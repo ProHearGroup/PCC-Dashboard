@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>PCC Dashboard</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+  :root{
+    --bg:#f6f7f9; --panel:#ffffff; --border:#e2e5ea; --text:#1b1f27; --muted:#6b7280;
+    --accent:#2a78d6; --accent-weak:#eaf1fc;
+    --good:#0ca30c; --good-weak:#e9f8e9;
+    --bad:#d93025; --bad-weak:#fdeceb;
+    --warn:#b5790a; --warn-weak:#fdf3df;
+    --shadow: 0 1px 2px rgba(16,24,40,.06), 0 1px 3px rgba(16,24,40,.08);
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#14161a; --panel:#1c1f26; --border:#2b2f38; --text:#e8eaed; --muted:#9aa1ad;
+      --accent:#3987e5; --accent-weak:#16314f;
+      --good:#2fbf3a; --good-weak:#102a12;
+      --bad:#f0564a; --bad-weak:#3a1613;
+      --warn:#e0a930; --warn-weak:#3a2d0f;
+      --shadow: 0 1px 2px rgba(0,0,0,.4), 0 2px 6px rgba(0,0,0,.35);
+    }
+  }
+  *{box-sizing:border-box;}
+  body{margin:0; background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; font-size:14px;}
+  .wrap{max-width:1180px; margin:0 auto; padding:20px 16px 60px;}
+  header.top{display:flex; align-items:baseline; justify-content:space-between; flex-wrap:wrap; gap:8px; margin-bottom:14px;}
+  h1{font-size:19px; margin:0;}
+  .sub{color:var(--muted); font-size:12.5px;}
+  .nav{display:flex; gap:4px; border-bottom:1px solid var(--border); margin-bottom:16px; flex-wrap:wrap;}
+  .nav button{appearance:none; border:none; background:none; color:var(--muted); font-size:13.5px; padding:9px 13px; cursor:pointer; border-bottom:2px solid transparent; font-weight:600;}
+  .nav button.active{color:var(--accent); border-bottom-color:var(--accent);}
+  .card{background:var(--panel); border:1px solid var(--border); border-radius:10px; padding:16px; box-shadow:var(--shadow); margin-bottom:16px;}
+  .card h2{font-size:14.5px; margin:0 0 12px;}
+  .card h3{font-size:13px; margin:0 0 8px; color:var(--muted); font-weight:600; text-transform:uppercase; letter-spacing:.03em;}
+  .kpis{display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:10px; margin-bottom:16px;}
+  .kpi{background:var(--panel); border:1px solid var(--border); border-radius:10px; padding:13px 14px; box-shadow:var(--shadow);}
+  .kpi .label{font-size:11.5px; color:var(--muted); text-transform:uppercase; letter-spacing:.03em; margin-bottom:4px;}
+  .kpi .value{font-size:22px; font-weight:700;}
+  .kpi .delta{font-size:11.5px; margin-top:3px;}
+  .delta.up{color:var(--good);} .delta.down{color:var(--bad);} .delta.flat{color:var(--muted);}
+  table{width:100%; border-collapse:collapse; font-size:13px;}
+  th,td{text-align:left; padding:7px 9px; border-bottom:1px solid var(--border); white-space:nowrap;}
+  th{color:var(--muted); font-weight:600; font-size:11.5px; text-transform:uppercase; letter-spacing:.02em;}
+  tr:last-child td{border-bottom:none;}
+  tr.totals td{font-weight:700; border-top:2px solid var(--border);}
+  .pill{display:inline-block; padding:2px 8px; border-radius:99px; font-size:11px; font-weight:600;}
+  .pill.good{background:var(--good-weak); color:var(--good);}
+  .pill.bad{background:var(--bad-weak); color:var(--bad);}
+  .pill.warn{background:var(--warn-weak); color:var(--warn);}
+  .pill.accent{background:var(--accent-weak); color:var(--accent);}
+  select, input[type=text], input[type=date], input[type=file]{
+    background:var(--panel); border:1px solid var(--border); color:var(--text); border-radius:7px;
+    padding:7px 9px; font-size:13px; font-family:inherit;
+  }
+  label{font-size:12.5px; color:var(--muted); display:block; margin-bottom:4px;}
+  .field{margin-bottom:12px;}
+  .row{display:flex; gap:16px; flex-wrap:wrap; align-items:flex-end;}
+  .btn{appearance:none; border:1px solid var(--accent); background:var(--accent); color:#fff; font-weight:600;
+    font-size:13px; padding:8px 15px; border-radius:7px; cursor:pointer;}
+  .btn:disabled{opacity:.5; cursor:default;}
+  .btn.secondary{background:none; color:var(--accent);}
+  .btn.sm{padding:5px 10px; font-size:12px;}
+  .muted{color:var(--muted);}
+  .toast{position:fixed; bottom:18px; right:18px; background:var(--panel); border:1px solid var(--border);
+    box-shadow:var(--shadow); border-radius:9px; padding:10px 16px; font-size:13px; opacity:0; transform:translateY(8px);
+    transition:opacity .2s, transform .2s; z-index:50;}
+  .toast.show{opacity:1; transform:translateY(0);}
+  .reviewTable input[type=text]{width:140px;}
+  .buddyTag{font-size:10.5px; padding:1px 6px; border-radius:99px; background:var(--warn-weak); color:var(--warn); margin-left:6px; font-weight:600;}
+  .queueBlock{margin-bottom:18px; padding-bottom:12px; border-bottom:1px dashed var(--border);}
+  .queueBlock:last-child{border-bottom:none; margin-bottom:0; padding-bottom:0;}
+  .queueHead{display:flex; justify-content:space-between; align-items:baseline; margin-bottom:6px; flex-wrap:wrap; gap:8px;}
+  .queueHead .qname{font-weight:700;}
+  .searchBox{margin-bottom:10px;}
+  .empty{color:var(--muted); font-size:13px; padding:10px 0;}
+  svg.chart text{fill:var(--muted); font-size:10.5px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div>
+      <h1>PCC Dashboard</h1>
+      <div class="sub">Patient Care Coordinator call performance &amp; queue coverage, by clinic</div>
+    </div>
+    <div id="weekSelectWrap"></div>
+  </header>
+
+  <div class="nav" id="nav">
+    <button data-tab="overview" class="active">Overview</button>
+    <button data-tab="table">PCC Table</button>
+    <button data-tab="queues">Queue Coverage</button>
+    <button data-tab="upload">Upload &amp; Review</button>
+    <button data-tab="mapping">Line Mapping</button>
+  </div>
+
+  <div id="tab-overview"></div>
+  <div id="tab-table" style="display:none;"></div>
+  <div id="tab-queues" style="display:none;"></div>
+  <div id="tab-upload" style="display:none;"></div>
+  <div id="tab-mapping" style="display:none;"></div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+"use strict";
+
+/* ===================================================================
+ * 0. KNOWN DATA / VOCAB
+ * =================================================================== */
+var KNOWN_EXT_CLINIC = {
+  "119":"Portage","125":"Roseville","203":"Palm Harbor","212":"Alpharetta","222":"Hilton Head",
+  "226":"Bluffton","232":"Alexandria","240":"Ocala","252":"Venice","253":"Venice","261":"Westchase",
+  "264":"Tampa Palms","273":"Sarasota","282":"Lutz","300":"Sebring Medical","310":"Edina",
+  "321":"Anoka","322":"Maple Grove","323":"Eden Prairie","341":"New Ulm","350":"Mendota Heights",
+  "360":"Lansing","370":"Willmar","380":"Lake Wales","390":"Sebring ABH","400":"Lake Placid",
+  "410":"Chesapeake","420":"Newport News","430":"Smithfield","440":"Winter Haven","460":"Raleigh",
+  "461":"Raleigh","470":"Granger","580":"Bonita Springs","590":"Ava Maria","595":"Naples"
+};
+var VOCAB = [
+  "Sebring Medical","Sebring ABH","Hilton Head","Tampa Palms","Palm Harbor","Eden Prairie",
+  "Maple
