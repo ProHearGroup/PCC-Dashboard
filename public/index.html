@@ -1,0 +1,881 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>PCC Dashboard</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+  :root{
+    --bg:#f6f7f9; --panel:#ffffff; --border:#e2e5ea; --text:#1b1f27; --muted:#6b7280;
+    --accent:#2a78d6; --accent-weak:#eaf1fc;
+    --good:#0ca30c; --good-weak:#e9f8e9;
+    --bad:#d93025; --bad-weak:#fdeceb;
+    --warn:#b5790a; --warn-weak:#fdf3df;
+    --shadow: 0 1px 2px rgba(16,24,40,.06), 0 1px 3px rgba(16,24,40,.08);
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#14161a; --panel:#1c1f26; --border:#2b2f38; --text:#e8eaed; --muted:#9aa1ad;
+      --accent:#3987e5; --accent-weak:#16314f;
+      --good:#2fbf3a; --good-weak:#102a12;
+      --bad:#f0564a; --bad-weak:#3a1613;
+      --warn:#e0a930; --warn-weak:#3a2d0f;
+      --shadow: 0 1px 2px rgba(0,0,0,.4), 0 2px 6px rgba(0,0,0,.35);
+    }
+  }
+  *{box-sizing:border-box;}
+  body{margin:0; background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; font-size:14px;}
+  .wrap{max-width:1180px; margin:0 auto; padding:20px 16px 60px;}
+  header.top{display:flex; align-items:baseline; justify-content:space-between; flex-wrap:wrap; gap:8px; margin-bottom:14px;}
+  h1{font-size:19px; margin:0;}
+  .sub{color:var(--muted); font-size:12.5px;}
+  .nav{display:flex; gap:4px; border-bottom:1px solid var(--border); margin-bottom:16px; flex-wrap:wrap;}
+  .nav button{appearance:none; border:none; background:none; color:var(--muted); font-size:13.5px; padding:9px 13px; cursor:pointer; border-bottom:2px solid transparent; font-weight:600;}
+  .nav button.active{color:var(--accent); border-bottom-color:var(--accent);}
+  .card{background:var(--panel); border:1px solid var(--border); border-radius:10px; padding:16px; box-shadow:var(--shadow); margin-bottom:16px;}
+  .card h2{font-size:14.5px; margin:0 0 12px;}
+  .card h3{font-size:13px; margin:0 0 8px; color:var(--muted); font-weight:600; text-transform:uppercase; letter-spacing:.03em;}
+  .kpis{display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:10px; margin-bottom:16px;}
+  .kpi{background:var(--panel); border:1px solid var(--border); border-radius:10px; padding:13px 14px; box-shadow:var(--shadow);}
+  .kpi .label{font-size:11.5px; color:var(--muted); text-transform:uppercase; letter-spacing:.03em; margin-bottom:4px;}
+  .kpi .value{font-size:22px; font-weight:700;}
+  .kpi .delta{font-size:11.5px; margin-top:3px;}
+  .delta.up{color:var(--good);} .delta.down{color:var(--bad);} .delta.flat{color:var(--muted);}
+  table{width:100%; border-collapse:collapse; font-size:13px;}
+  th,td{text-align:left; padding:7px 9px; border-bottom:1px solid var(--border); white-space:nowrap;}
+  th{color:var(--muted); font-weight:600; font-size:11.5px; text-transform:uppercase; letter-spacing:.02em;}
+  tr:last-child td{border-bottom:none;}
+  tr.totals td{font-weight:700; border-top:2px solid var(--border);}
+  .pill{display:inline-block; padding:2px 8px; border-radius:99px; font-size:11px; font-weight:600;}
+  .pill.good{background:var(--good-weak); color:var(--good);}
+  .pill.bad{background:var(--bad-weak); color:var(--bad);}
+  .pill.warn{background:var(--warn-weak); color:var(--warn);}
+  .pill.accent{background:var(--accent-weak); color:var(--accent);}
+  select, input[type=text], input[type=date], input[type=file]{
+    background:var(--panel); border:1px solid var(--border); color:var(--text); border-radius:7px;
+    padding:7px 9px; font-size:13px; font-family:inherit;
+  }
+  label{font-size:12.5px; color:var(--muted); display:block; margin-bottom:4px;}
+  .field{margin-bottom:12px;}
+  .row{display:flex; gap:16px; flex-wrap:wrap; align-items:flex-end;}
+  .btn{appearance:none; border:1px solid var(--accent); background:var(--accent); color:#fff; font-weight:600;
+    font-size:13px; padding:8px 15px; border-radius:7px; cursor:pointer;}
+  .btn:disabled{opacity:.5; cursor:default;}
+  .btn.secondary{background:none; color:var(--accent);}
+  .btn.sm{padding:5px 10px; font-size:12px;}
+  .muted{color:var(--muted);}
+  .toast{position:fixed; bottom:18px; right:18px; background:var(--panel); border:1px solid var(--border);
+    box-shadow:var(--shadow); border-radius:9px; padding:10px 16px; font-size:13px; opacity:0; transform:translateY(8px);
+    transition:opacity .2s, transform .2s; z-index:50;}
+  .toast.show{opacity:1; transform:translateY(0);}
+  .reviewTable input[type=text]{width:140px;}
+  .buddyTag{font-size:10.5px; padding:1px 6px; border-radius:99px; background:var(--warn-weak); color:var(--warn); margin-left:6px; font-weight:600;}
+  .queueBlock{margin-bottom:18px; padding-bottom:12px; border-bottom:1px dashed var(--border);}
+  .queueBlock:last-child{border-bottom:none; margin-bottom:0; padding-bottom:0;}
+  .queueHead{display:flex; justify-content:space-between; align-items:baseline; margin-bottom:6px; flex-wrap:wrap; gap:8px;}
+  .queueHead .qname{font-weight:700;}
+  .searchBox{margin-bottom:10px;}
+  .empty{color:var(--muted); font-size:13px; padding:10px 0;}
+  svg.chart text{fill:var(--muted); font-size:10.5px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div>
+      <h1>PCC Dashboard</h1>
+      <div class="sub">Patient Care Coordinator call performance &amp; queue coverage, by clinic</div>
+    </div>
+    <div id="weekSelectWrap"></div>
+  </header>
+
+  <div class="nav" id="nav">
+    <button data-tab="overview" class="active">Overview</button>
+    <button data-tab="table">PCC Table</button>
+    <button data-tab="queues">Queue Coverage</button>
+    <button data-tab="upload">Upload &amp; Review</button>
+    <button data-tab="mapping">Line Mapping</button>
+  </div>
+
+  <div id="tab-overview"></div>
+  <div id="tab-table" style="display:none;"></div>
+  <div id="tab-queues" style="display:none;"></div>
+  <div id="tab-upload" style="display:none;"></div>
+  <div id="tab-mapping" style="display:none;"></div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+"use strict";
+
+/* ===================================================================
+ * 0. KNOWN DATA / VOCAB
+ * =================================================================== */
+var KNOWN_EXT_CLINIC = {
+  "119":"Portage","125":"Roseville","203":"Palm Harbor","212":"Alpharetta","222":"Hilton Head",
+  "226":"Bluffton","232":"Alexandria","240":"Ocala","252":"Venice","253":"Venice","261":"Westchase",
+  "264":"Tampa Palms","273":"Sarasota","282":"Lutz","300":"Sebring Medical","310":"Edina",
+  "321":"Anoka","322":"Maple Grove","323":"Eden Prairie","341":"New Ulm","350":"Mendota Heights",
+  "360":"Lansing","370":"Willmar","380":"Lake Wales","390":"Sebring ABH","400":"Lake Placid",
+  "410":"Chesapeake","420":"Newport News","430":"Smithfield","440":"Winter Haven","460":"Raleigh",
+  "461":"Raleigh","470":"Granger","580":"Bonita Springs","590":"Ava Maria","595":"Naples"
+};
+var VOCAB = [
+  "Sebring Medical","Sebring ABH","Hilton Head","Tampa Palms","Palm Harbor","Eden Prairie",
+  "Maple Grove","Mendota Heights","Lake Wales","Lake Placid","Newport News","Winter Haven",
+  "Winterhaven","Bonita Springs","Ave Maria","Ava Maria","Cape Coral","New Ulm",
+  "Portage","Roseville","Alpharetta","Bluffton","Alexandria","Ocala","Venice","Westchase",
+  "Sarasota","Lutz","Edina","Anoka","Lansing","Willmar","Chesapeake","Smithfield","Raleigh",
+  "Granger","Naples","Asheville","Cary","Sebring"
+];
+
+function guessClinic(code, label){
+  if(KNOWN_EXT_CLINIC[code]) return KNOWN_EXT_CLINIC[code];
+  var up = (label||"").toUpperCase();
+  var best = "";
+  VOCAB.forEach(function(loc){
+    if(up.indexOf(loc.toUpperCase()) !== -1 && loc.length > best.length) best = loc;
+  });
+  return best;
+}
+
+/* ===================================================================
+ * 1. STATE
+ * =================================================================== */
+var state = {
+  lines: {},        // ext -> {category:'pcc'|'ignore', clinic, label, updatedAt}
+  queues: {},        // queueCode -> {category:'queue'|'ignore', clinic, label, updatedAt}
+  weekly: {},        // ext -> {weeks:{weekEnding:{inboundAnswered,inboundUnanswered,outboundAnswered,outboundUnanswered,talkTimeSec}}}
+  queueWeekly: {},    // queueCode -> {weeks:{weekEnding:{received,serviced,unanswered,agents:[{ext,servicedCalls,polls,talkTimeSec}]}}}
+  uploads: [],
+  dbReady: false,
+  pendingParse: null,
+  selectedWeek: null,
+  activeTab: "overview"
+};
+
+/* ===================================================================
+ * 2. PARSING
+ * =================================================================== */
+function stripCodeLabel(raw){
+  raw = String(raw==null?"":raw).trim();
+  var m = raw.match(/^(\d{2,4})\s*(.*)$/);
+  if(!m) return {code:null, label:raw};
+  return {code:m[1], label:(m[2]||"").trim()};
+}
+
+function parseTalkTime(val){
+  if(val===null || val===undefined || val==="") return 0;
+  if(typeof val === "number"){
+    if(val > 0 && val < 10) return Math.round(val*86400); // excel day-fraction
+    return Math.round(val);
+  }
+  var s = String(val).trim();
+  var m = s.match(/^(\d+):(\d{2}):(\d{2})$/);
+  if(!m) return 0;
+  return (+m[1])*3600 + (+m[2])*60 + (+m[3]);
+}
+
+function fmtHMS(totalSec){
+  totalSec = Math.max(0, Math.round(totalSec||0));
+  var h = Math.floor(totalSec/3600), m = Math.floor((totalSec%3600)/60), s = totalSec%60;
+  function p(n){ return (n<10?"0":"")+n; }
+  return p(h)+":"+p(m)+":"+p(s);
+}
+
+async function readWorkbookRows(file){
+  var buf = await file.arrayBuffer();
+  var wb = XLSX.read(buf, {type:"array"});
+  var sheet = wb.Sheets[wb.SheetNames[0]];
+  return XLSX.utils.sheet_to_json(sheet, {defval:""});
+}
+
+function normalizeExtStats(rows){
+  var out = [];
+  rows.forEach(function(r){
+    var raw = String(r["Agent Extension"]||"").trim();
+    if(!raw || raw.toLowerCase()==="totals") return;
+    var ce = stripCodeLabel(raw);
+    if(!ce.code) return;
+    out.push({
+      ext: ce.code,
+      label: ce.label,
+      inboundAnswered: Number(r["Inbound Answered"])||0,
+      inboundUnanswered: Number(r["Inbound Unanswered"])||0,
+      outboundAnswered: Number(r["Outbound Answered"])||0,
+      outboundUnanswered: Number(r["Outbound Unanswered"])||0,
+      talkTimeSec: parseTalkTime(r["Total Talking Time"])
+    });
+  });
+  return out;
+}
+
+function normalizeQueuePerf(rows){
+  var queues = {};
+  rows.forEach(function(r){
+    var qraw = String(r["Queue"]||"").trim();
+    if(!qraw || qraw.toLowerCase()==="totals") return;
+    var cq = stripCodeLabel(qraw);
+    if(!cq.code) return;
+    if(!queues[cq.code]) queues[cq.code] = {label:cq.label, received:0, serviced:0, unanswered:0, agents:[]};
+    var eraw = String(r["Extension"]||"").trim();
+    if(!eraw){
+      queues[cq.code].received = Number(r["Queue Received Calls"])||0;
+      queues[cq.code].serviced = Number(r["Queue Serviced Calls"])||0;
+      queues[cq.code].unanswered = Number(r["Queue Unanswered Calls"])||0;
+    } else {
+      var ce = stripCodeLabel(eraw);
+      if(!ce.code) return;
+      queues[cq.code].agents.push({
+        ext: ce.code,
+        label: ce.label,
+        servicedCalls: Number(r["Extension Serviced Calls"])||0,
+        polls: Number(r["Extension Polls"])||0,
+        talkTimeSec: parseTalkTime(r["Talk Time"])
+      });
+    }
+  });
+  return queues;
+}
+
+/* ===================================================================
+ * 3. PERSISTENCE (Netlify Function + Blobs backend)
+ * =================================================================== */
+var API_BASE = "/api/data";
+
+async function apiGet(collection){
+  var res = await fetch(API_BASE + "/" + collection);
+  if(!res.ok) throw new Error("GET " + collection + " failed: " + res.status);
+  return res.json();
+}
+async function apiSet(collection, id, data){
+  var res = await fetch(API_BASE + "/" + collection + "/" + encodeURIComponent(id), {
+    method:"PUT", headers:{"Content-Type":"application/json"}, body: JSON.stringify(data)
+  });
+  if(!res.ok) throw new Error("PUT " + collection + "/" + id + " failed: " + res.status);
+  return res.json();
+}
+async function apiAdd(collection, data){
+  var res = await fetch(API_BASE + "/" + collection, {
+    method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(data)
+  });
+  if(!res.ok) throw new Error("POST " + collection + " failed: " + res.status);
+  return res.json();
+}
+
+async function initDb(){
+  try{
+    await loadAllFromDb();
+    state.dbReady = true;
+  }catch(e){ state.dbReady = false; console.error("PCC Dashboard: backend unreachable", e); }
+  renderAll();
+}
+
+async function loadAllFromDb(){
+  try{
+    var linesResp = await apiGet("lines");
+    (linesResp.docs||[]).forEach(function(d){ if(d.data) state.lines[d.id] = d.data; });
+  }catch(e){}
+  try{
+    var queuesResp = await apiGet("queues");
+    (queuesResp.docs||[]).forEach(function(d){ if(d.data) state.queues[d.id] = d.data; });
+  }catch(e){}
+  try{
+    var weeklyResp = await apiGet("weekly");
+    (weeklyResp.docs||[]).forEach(function(d){ if(d.data && d.data.weeks) state.weekly[d.id] = d.data.weeks; });
+  }catch(e){}
+  try{
+    var qwResp = await apiGet("queueWeekly");
+    (qwResp.docs||[]).forEach(function(d){ if(d.data && d.data.weeks) state.queueWeekly[d.id] = d.data.weeks; });
+  }catch(e){}
+  try{
+    var upResp = await apiGet("uploads");
+    state.uploads = (upResp.docs||[]).map(function(d){ return d.data; }).filter(Boolean)
+      .sort(function(a,b){ return (b.uploadedAt||"").localeCompare(a.uploadedAt||""); }).slice(0,80);
+  }catch(e){}
+}
+
+async function persistLine(ext, obj){
+  state.lines[ext] = obj;
+  try{ await apiSet("lines", ext, obj); }catch(e){ console.error(e); }
+}
+async function persistQueue(code, obj){
+  state.queues[code] = obj;
+  try{ await apiSet("queues", code, obj); }catch(e){ console.error(e); }
+}
+async function persistWeekly(ext, weekEnding, data){
+  var existing = state.weekly[ext] || {};
+  var merged = Object.assign({}, existing);
+  merged[weekEnding] = data;
+  state.weekly[ext] = merged;
+  try{ await apiSet("weekly", ext, {weeks:merged}); }catch(e){ console.error(e); }
+}
+async function persistQueueWeekly(code, weekEnding, data){
+  var existing = state.queueWeekly[code] || {};
+  var merged = Object.assign({}, existing);
+  merged[weekEnding] = data;
+  state.queueWeekly[code] = merged;
+  try{ await apiSet("queueWeekly", code, {weeks:merged}); }catch(e){ console.error(e); }
+}
+async function persistUpload(meta){
+  state.uploads.unshift(meta);
+  try{ await apiAdd("uploads", meta); }catch(e){ console.error(e); }
+}
+
+/* ===================================================================
+ * 4. UPLOAD + REVIEW FLOW
+ * =================================================================== */
+function allWeeks(){
+  var set = {};
+  Object.keys(state.weekly).forEach(function(ext){
+    Object.keys(state.weekly[ext]).forEach(function(w){ set[w]=true; });
+  });
+  Object.keys(state.queueWeekly).forEach(function(code){
+    Object.keys(state.queueWeekly[code]).forEach(function(w){ set[w]=true; });
+  });
+  return Object.keys(set).sort(); // ascending
+}
+
+async function handleParseClick(){
+  var weekEnding = document.getElementById("weekEndingInput").value;
+  var extFile = document.getElementById("extStatsFile").files[0];
+  var queueFile = document.getElementById("queuePerfFile").files[0];
+  var statusEl = document.getElementById("uploadStatus");
+  if(!weekEnding){ statusEl.textContent = "Pick the week-ending date first."; return; }
+  if(!extFile || !queueFile){ statusEl.textContent = "Choose both files first."; return; }
+  statusEl.textContent = "Reading files…";
+  try{
+    var extRows = normalizeExtStats(await readWorkbookRows(extFile));
+    var queues = normalizeQueuePerf(await readWorkbookRows(queueFile));
+    var newCodes = [];
+    var seen = {};
+    extRows.forEach(function(r){
+      if(!state.lines[r.ext] && !seen["e"+r.ext]){
+        seen["e"+r.ext]=true;
+        newCodes.push({type:"line", code:r.ext, label:r.label, guess:guessClinic(r.ext, r.label)});
+      }
+    });
+    Object.keys(queues).forEach(function(qcode){
+      if(!state.queues[qcode] && !seen["q"+qcode]){
+        seen["q"+qcode]=true;
+        newCodes.push({type:"queue", code:qcode, label:queues[qcode].label, guess:guessClinic(qcode, queues[qcode].label)});
+      }
+      queues[qcode].agents.forEach(function(a){
+        if(!state.lines[a.ext] && !seen["e"+a.ext]){
+          seen["e"+a.ext]=true;
+          newCodes.push({type:"line", code:a.ext, label:a.label, guess:guessClinic(a.ext, a.label)});
+        }
+      });
+    });
+    state.pendingParse = {weekEnding:weekEnding, extRows:extRows, queues:queues,
+      extFilename:extFile.name, queueFilename:queueFile.name, newCodes:newCodes};
+    statusEl.textContent = "";
+    renderUploadTab();
+  }catch(e){
+    console.error(e);
+    statusEl.textContent = "Couldn't read those files — check they're the right exports.";
+  }
+}
+
+async function commitUpload(){
+  var pp = state.pendingParse;
+  if(!pp) return;
+  var btn = document.getElementById("commitBtn");
+  if(btn){ btn.disabled = true; btn.textContent = "Saving…"; }
+
+  // 1. persist any new line/queue mapping confirmations
+  var rows = document.querySelectorAll("#newCodesTable tr[data-type]");
+  for(var i=0;i<rows.length;i++){
+    var tr = rows[i];
+    var type = tr.getAttribute("data-type");
+    var code = tr.getAttribute("data-code");
+    var clinicInput = tr.querySelector("input[data-field=clinic]");
+    var catSelect = tr.querySelector("select[data-field=category]");
+    var clinic = clinicInput ? clinicInput.value.trim() : "";
+    var category = catSelect ? catSelect.value : (type==="line"?"pcc":"queue");
+    var labelAttr = tr.getAttribute("data-label") || "";
+    if(type==="line"){
+      await persistLine(code, {category:category, clinic:clinic, label:labelAttr, updatedAt:new Date().toISOString()});
+    } else {
+      await persistQueue(code, {category:category, clinic:clinic, label:labelAttr, updatedAt:new Date().toISOString()});
+    }
+  }
+
+  // 2. persist weekly data per extension
+  for(var j=0;j<pp.extRows.length;j++){
+    var r = pp.extRows[j];
+    await persistWeekly(r.ext, pp.weekEnding, {
+      inboundAnswered:r.inboundAnswered, inboundUnanswered:r.inboundUnanswered,
+      outboundAnswered:r.outboundAnswered, outboundUnanswered:r.outboundUnanswered,
+      talkTimeSec:r.talkTimeSec
+    });
+  }
+
+  // 3. persist weekly data per queue
+  var qcodes = Object.keys(pp.queues);
+  for(var k=0;k<qcodes.length;k++){
+    var qc = qcodes[k];
+    var q = pp.queues[qc];
+    await persistQueueWeekly(qc, pp.weekEnding, {
+      received:q.received, serviced:q.serviced, unanswered:q.unanswered, agents:q.agents
+    });
+  }
+
+  // 4. log the upload
+  await persistUpload({
+    weekEnding: pp.weekEnding, extFilename: pp.extFilename, queueFilename: pp.queueFilename,
+    extRows: pp.extRows.length, queueCount: qcodes.length, uploadedAt: new Date().toISOString()
+  });
+
+  state.pendingParse = null;
+  state.selectedWeek = pp.weekEnding;
+  document.getElementById("extStatsFile").value = "";
+  document.getElementById("queuePerfFile").value = "";
+  showToast("Week of " + pp.weekEnding + " saved");
+  renderAll();
+}
+
+function cancelPending(){
+  state.pendingParse = null;
+  renderUploadTab();
+}
+
+/* ===================================================================
+ * 5. RENDERING — shared helpers
+ * =================================================================== */
+function el(tag, attrs, children){
+  var e = document.createElementNS(tag==="svg"||tag==="rect"||tag==="text"||tag==="line"||tag==="g"||tag==="path" ? "http://www.w3.org/2000/svg" : null, tag);
+  // fallback for non-svg
+  if(!e || e.namespaceURI !== "http://www.w3.org/2000/svg"){
+    e = document.createElement(tag);
+  }
+  if(attrs) Object.keys(attrs).forEach(function(k){ e.setAttribute(k, attrs[k]); });
+  (children||[]).forEach(function(c){ e.appendChild(c); });
+  return e;
+}
+function showToast(msg){
+  var t = document.getElementById("toast");
+  t.textContent = msg;
+  t.classList.add("show");
+  setTimeout(function(){ t.classList.remove("show"); }, 2600);
+}
+function escapeHtml(s){
+  return String(s==null?"":s).replace(/[&<>"']/g, function(c){
+    return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];
+  });
+}
+function pctDelta(cur, prev){
+  if(prev===0 && cur===0) return {text:"—", cls:"flat"};
+  if(prev===0) return {text:"new", cls:"up"};
+  var d = ((cur-prev)/prev)*100;
+  var cls = d>0.5 ? "up" : (d<-0.5 ? "down" : "flat");
+  var sign = d>0 ? "+" : "";
+  return {text: sign + d.toFixed(0) + "% vs prior week", cls:cls};
+}
+
+function weekLineClinic(ext){
+  var line = state.lines[ext];
+  return line ? (line.clinic || "") : "";
+}
+function weekQueueClinic(code){
+  var q = state.queues[code];
+  return q ? (q.clinic || "") : "";
+}
+
+function totalsForWeek(week){
+  var out = {inboundAnswered:0, inboundUnanswered:0, outboundAnswered:0, outboundUnanswered:0, talkTimeSec:0};
+  if(!week) return out;
+  Object.keys(state.weekly).forEach(function(ext){
+    var d = state.weekly[ext][week];
+    if(!d) return;
+    var line = state.lines[ext];
+    if(line && line.category==="ignore") return;
+    out.inboundAnswered += d.inboundAnswered||0;
+    out.inboundUnanswered += d.inboundUnanswered||0;
+    out.outboundAnswered += d.outboundAnswered||0;
+    out.outboundUnanswered += d.outboundUnanswered||0;
+    out.talkTimeSec += d.talkTimeSec||0;
+  });
+  return out;
+}
+
+/* ===================================================================
+ * 6. RENDERING — tabs
+ * =================================================================== */
+function renderWeekSelector(){
+  var weeks = allWeeks();
+  var wrap = document.getElementById("weekSelectWrap");
+  if(weeks.length===0){ wrap.innerHTML = ""; return; }
+  if(!state.selectedWeek || weeks.indexOf(state.selectedWeek)===-1) state.selectedWeek = weeks[weeks.length-1];
+  var html = '<select id="weekSelect">' + weeks.slice().reverse().map(function(w){
+    return '<option value="'+w+'"'+(w===state.selectedWeek?' selected':'')+'>Week of '+w+'</option>';
+  }).join("") + '</select>';
+  wrap.innerHTML = html;
+  document.getElementById("weekSelect").addEventListener("change", function(e){
+    state.selectedWeek = e.target.value;
+    renderAll();
+  });
+}
+
+function renderOverview(){
+  var root = document.getElementById("tab-overview");
+  var weeks = allWeeks();
+  if(weeks.length===0){
+    root.innerHTML = '<div class="card"><div class="empty">No weeks uploaded yet — head to Upload &amp; Review to load your first Extension Statistics + Queue Performance pair.</div></div>';
+    return;
+  }
+  var week = state.selectedWeek || weeks[weeks.length-1];
+  var idx = weeks.indexOf(week);
+  var prevWeek = idx>0 ? weeks[idx-1] : null;
+  var cur = totalsForWeek(week);
+  var prev = totalsForWeek(prevWeek);
+
+  function tile(label, value, deltaCur, deltaPrev){
+    var d = pctDelta(deltaCur, deltaPrev);
+    return '<div class="kpi"><div class="label">'+label+'</div><div class="value">'+value+'</div>'+
+      (prevWeek ? '<div class="delta '+d.cls+'">'+d.text+'</div>' : '') + '</div>';
+  }
+  var answerRate = (cur.inboundAnswered+cur.inboundUnanswered)>0 ?
+    Math.round(100*cur.inboundAnswered/(cur.inboundAnswered+cur.inboundUnanswered)) : 0;
+
+  var html = '<div class="kpis">' +
+    tile("Inbound Answered", cur.inboundAnswered, cur.inboundAnswered, prev.inboundAnswered) +
+    tile("Inbound Unanswered", cur.inboundUnanswered, cur.inboundUnanswered, prev.inboundUnanswered) +
+    tile("Outbound Answered", cur.outboundAnswered, cur.outboundAnswered, prev.outboundAnswered) +
+    tile("Outbound Unanswered", cur.outboundUnanswered, cur.outboundUnanswered, prev.outboundUnanswered) +
+    '<div class="kpi"><div class="label">Answer Rate</div><div class="value">'+answerRate+'%</div></div>' +
+    '</div>';
+
+  html += '<div class="card"><h2>Inbound calls — last weeks</h2><div id="chartInboundWrap"></div></div>';
+  html += '<div class="card"><h2>Outbound calls — last weeks</h2><div id="chartOutboundWrap"></div></div>';
+  root.innerHTML = html;
+
+  var lastWeeks = weeks.slice(-10);
+  var inboundAns = [], inboundUnans = [], outAns = [], outUnans = [];
+  lastWeeks.forEach(function(w){
+    var t = totalsForWeek(w);
+    inboundAns.push(t.inboundAnswered); inboundUnans.push(t.inboundUnanswered);
+    outAns.push(t.outboundAnswered); outUnans.push(t.outboundUnanswered);
+  });
+  drawGroupedBars(document.getElementById("chartInboundWrap"), lastWeeks,
+    [{key:"ans", color:"var(--good)", name:"Answered"}, {key:"unans", color:"var(--bad)", name:"Unanswered"}],
+    {ans:inboundAns, unans:inboundUnans});
+  drawGroupedBars(document.getElementById("chartOutboundWrap"), lastWeeks,
+    [{key:"ans", color:"var(--accent)", name:"Answered"}, {key:"unans", color:"var(--warn)", name:"Unanswered"}],
+    {ans:outAns, unans:outUnans});
+}
+
+function drawGroupedBars(container, labels, seriesDefs, series){
+  container.innerHTML = "";
+  var W = Math.max(container.clientWidth || 540, 320), H = 180;
+  var pad = {l:34, r:10, t:10, b:26};
+  var svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("class", "chart");
+  svg.setAttribute("width", "100%"); svg.setAttribute("height", H);
+  svg.setAttribute("viewBox", "0 0 " + W + " " + H);
+
+  var grandTotal = 0;
+  labels.forEach(function(l, i){ seriesDefs.forEach(function(def){ grandTotal += (series[def.key][i]||0); }); });
+  if(labels.length===0 || grandTotal===0){
+    var msgText = document.createElementNS("http://www.w3.org/2000/svg","text");
+    msgText.setAttribute("x", W/2); msgText.setAttribute("y", H/2);
+    msgText.setAttribute("text-anchor","middle"); msgText.setAttribute("font-size","13");
+    msgText.textContent = labels.length===0 ? "No weeks uploaded yet" : "Nothing recorded here for the current filters";
+    svg.appendChild(msgText);
+    container.appendChild(svg);
+    return;
+  }
+
+  var maxVal = 1;
+  labels.forEach(function(l,i){
+    var sum = 0;
+    seriesDefs.forEach(function(def){ sum = Math.max(sum, series[def.key][i]||0); });
+    maxVal = Math.max(maxVal, sum);
+  });
+  var plotW = W - pad.l - pad.r, plotH = H - pad.t - pad.b;
+  var groupW = plotW / labels.length;
+  var barW = Math.min(16, (groupW - 10) / seriesDefs.length);
+
+  // gridlines
+  [0, 0.5, 1].forEach(function(f){
+    var y = pad.t + plotH * (1-f);
+    var line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+    line.setAttribute("x1", pad.l); line.setAttribute("x2", W-pad.r);
+    line.setAttribute("y1", y); line.setAttribute("y2", y);
+    line.setAttribute("stroke", "var(--border)"); line.setAttribute("stroke-width", "1");
+    svg.appendChild(line);
+  });
+
+  labels.forEach(function(wk, i){
+    var gx = pad.l + i*groupW + (groupW - barW*seriesDefs.length)/2;
+    seriesDefs.forEach(function(def, si){
+      var val = series[def.key][i]||0;
+      var bh = plotH * (val/maxVal);
+      var rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+      rect.setAttribute("x", gx + si*barW);
+      rect.setAttribute("y", pad.t + plotH - bh);
+      rect.setAttribute("width", Math.max(1,barW-2));
+      rect.setAttribute("height", Math.max(0,bh));
+      rect.setAttribute("fill", def.color);
+      rect.setAttribute("rx", "2");
+      var title = document.createElementNS("http://www.w3.org/2000/svg","title");
+      title.textContent = def.name + " — " + wk + ": " + val;
+      rect.appendChild(title);
+      svg.appendChild(rect);
+    });
+    var lbl = document.createElementNS("http://www.w3.org/2000/svg", "text");
+    lbl.setAttribute("x", gx + (groupW-10)/2);
+    lbl.setAttribute("y", H-8);
+    lbl.setAttribute("text-anchor","middle");
+    lbl.textContent = wk.slice(5); // MM-DD
+    svg.appendChild(lbl);
+  });
+  container.appendChild(svg);
+}
+
+function renderPccTable(){
+  var root = document.getElementById("tab-table");
+  var weeks = allWeeks();
+  if(weeks.length===0){ root.innerHTML = '<div class="card"><div class="empty">No data yet.</div></div>'; return; }
+  var week = state.selectedWeek || weeks[weeks.length-1];
+
+  var rows = [];
+  Object.keys(state.lines).forEach(function(ext){
+    var line = state.lines[ext];
+    if(line.category==="ignore") return;
+    var d = (state.weekly[ext]||{})[week];
+    if(!d) return;
+    rows.push({ext:ext, clinic:line.clinic||"(unmapped)", label:line.label, d:d});
+  });
+  rows.sort(function(a,b){ return a.clinic.localeCompare(b.clinic) || a.ext.localeCompare(b.ext); });
+
+  var totals = {inboundAnswered:0, inboundUnanswered:0, outboundAnswered:0, outboundUnanswered:0, talkTimeSec:0};
+  rows.forEach(function(r){
+    totals.inboundAnswered += r.d.inboundAnswered; totals.inboundUnanswered += r.d.inboundUnanswered;
+    totals.outboundAnswered += r.d.outboundAnswered; totals.outboundUnanswered += r.d.outboundUnanswered;
+    totals.talkTimeSec += r.d.talkTimeSec;
+  });
+
+  var html = '<div class="card"><h2>PCC performance — week of ' + week + '</h2>';
+  html += '<div class="searchBox"><input type="text" id="pccFilter" placeholder="Filter by clinic or name…" /></div>';
+  html += '<table id="pccTableEl"><thead><tr><th>Clinic</th><th>Agent</th><th>Ext</th>' +
+    '<th>Inbound Ans.</th><th>Inbound Unans.</th><th>Outbound Ans.</th><th>Outbound Unans.</th><th>Talk Time</th></tr></thead><tbody>';
+  rows.forEach(function(r){
+    html += '<tr data-search="'+escapeHtml((r.clinic+" "+r.label).toLowerCase())+'">' +
+      '<td>'+escapeHtml(r.clinic)+'</td><td>'+escapeHtml(r.label)+'</td><td>'+r.ext+'</td>' +
+      '<td>'+r.d.inboundAnswered+'</td><td>'+r.d.inboundUnanswered+'</td>' +
+      '<td>'+r.d.outboundAnswered+'</td><td>'+r.d.outboundUnanswered+'</td>' +
+      '<td>'+fmtHMS(r.d.talkTimeSec)+'</td></tr>';
+  });
+  html += '<tr class="totals"><td colspan="3">Totals</td>' +
+    '<td>'+totals.inboundAnswered+'</td><td>'+totals.inboundUnanswered+'</td>' +
+    '<td>'+totals.outboundAnswered+'</td><td>'+totals.outboundUnanswered+'</td>' +
+    '<td>'+fmtHMS(totals.talkTimeSec)+'</td></tr>';
+  html += '</tbody></table></div>';
+  root.innerHTML = html;
+
+  document.getElementById("pccFilter").addEventListener("input", function(e){
+    var q = e.target.value.toLowerCase();
+    document.querySelectorAll("#pccTableEl tbody tr[data-search]").forEach(function(tr){
+      tr.style.display = tr.getAttribute("data-search").indexOf(q)!==-1 ? "" : "none";
+    });
+  });
+}
+
+function renderQueues(){
+  var root = document.getElementById("tab-queues");
+  var weeks = allWeeks();
+  if(weeks.length===0){ root.innerHTML = '<div class="card"><div class="empty">No data yet.</div></div>'; return; }
+  var week = state.selectedWeek || weeks[weeks.length-1];
+
+  var codes = Object.keys(state.queueWeekly).filter(function(c){ return state.queueWeekly[c][week]; });
+  codes.sort(function(a,b){
+    var ca = weekQueueClinic(a) || a, cb = weekQueueClinic(b) || b;
+    return ca.localeCompare(cb);
+  });
+
+  if(codes.length===0){
+    root.innerHTML = '<div class="card"><div class="empty">No queue data for this week.</div></div>';
+    return;
+  }
+
+  var html = '<div class="card"><h2>Queue coverage — week of ' + week + '</h2>' +
+    '<div class="muted" style="margin-bottom:12px;">Rows marked <span class="buddyTag">covering</span> are an agent from a different clinic helping answer this queue.</div>';
+  codes.forEach(function(code){
+    var qd = state.queueWeekly[code][week];
+    var qInfo = state.queues[code] || {};
+    var qClinic = qInfo.clinic || "(unmapped queue "+code+")";
+    html += '<div class="queueBlock"><div class="queueHead"><span class="qname">'+escapeHtml(qClinic)+'</span>' +
+      '<span class="muted">Queue '+code+' · '+escapeHtml(qInfo.label||"")+'</span></div>';
+    html += '<table><thead><tr><th>Received</th><th>Serviced</th><th>Unanswered</th></tr></thead><tbody>' +
+      '<tr><td>'+qd.received+'</td><td>'+qd.serviced+'</td><td>'+qd.unanswered+'</td></tr></tbody></table>';
+    if(qd.agents && qd.agents.length){
+      html += '<table style="margin-top:6px;"><thead><tr><th>Agent</th><th>Ext</th><th>Clinic</th><th>Serviced</th><th>Polls</th><th>Talk Time</th></tr></thead><tbody>';
+      qd.agents.slice().sort(function(a,b){ return b.servicedCalls - a.servicedCalls; }).forEach(function(a){
+        var agentLine = state.lines[a.ext] || {};
+        var agentClinic = agentLine.clinic || "";
+        var isBuddy = agentClinic && qClinic && agentClinic !== qClinic && agentLine.category!=="ignore";
+        html += '<tr><td>'+escapeHtml(agentLine.label||"")+'</td><td>'+a.ext+'</td>' +
+          '<td>'+escapeHtml(agentClinic||"—")+(isBuddy?'<span class="buddyTag">covering</span>':'')+'</td>' +
+          '<td>'+a.servicedCalls+'</td><td>'+a.polls+'</td><td>'+fmtHMS(a.talkTimeSec)+'</td></tr>';
+      });
+      html += '</tbody></table>';
+    }
+    html += '</div>';
+  });
+  html += '</div>';
+  root.innerHTML = html;
+}
+
+function renderUploadTab(){
+  var root = document.getElementById("tab-upload");
+  var html = '<div class="card"><h2>Upload a week</h2>';
+  if(!state.pendingParse){
+    html += '<div class="row">' +
+      '<div class="field"><label>Week ending</label><input type="date" id="weekEndingInput" /></div>' +
+      '<div class="field"><label>Extension Statistics export</label><input type="file" id="extStatsFile" accept=".csv,.xlsx,.xls" /></div>' +
+      '<div class="field"><label>Queue Performance export</label><input type="file" id="queuePerfFile" accept=".csv,.xlsx,.xls" /></div>' +
+      '<div class="field"><button class="btn" id="parseBtn">Parse files</button></div>' +
+      '</div><div class="muted" id="uploadStatus"></div>';
+  } else {
+    var pp = state.pendingParse;
+    html += '<p>Week ending <strong>'+pp.weekEnding+'</strong> — '+pp.extRows.length+' agent rows from '+
+      escapeHtml(pp.extFilename)+', '+Object.keys(pp.queues).length+' queues from '+escapeHtml(pp.queueFilename)+'.</p>';
+    if(pp.newCodes.length){
+      html += '<h3>New lines/queues — confirm clinic</h3><table class="reviewTable" id="newCodesTable"><thead>' +
+        '<tr><th>Type</th><th>Code</th><th>Seen as</th><th>Clinic</th><th>Category</th></tr></thead><tbody>';
+      pp.newCodes.forEach(function(nc){
+        html += '<tr data-type="'+nc.type+'" data-code="'+nc.code+'" data-label="'+escapeHtml(nc.label)+'">' +
+          '<td>'+(nc.type==="line"?"Line":"Queue")+'</td><td>'+nc.code+'</td><td>'+escapeHtml(nc.label)+'</td>' +
+          '<td><input type="text" data-field="clinic" value="'+escapeHtml(nc.guess)+'" placeholder="Clinic name" /></td>' +
+          '<td><select data-field="category">' +
+            (nc.type==="line" ?
+              '<option value="pcc" selected>PCC line</option><option value="ignore">Not a clinic (ignore)</option>' :
+              '<option value="queue" selected>Queue</option><option value="ignore">Not a clinic (ignore)</option>') +
+          '</select></td></tr>';
+      });
+      html += '</tbody></table>';
+    } else {
+      html += '<p class="muted">No new lines or queues this week — everything already mapped.</p>';
+    }
+    html += '<div class="row" style="margin-top:14px;"><button class="btn" id="commitBtn">Save this week</button>' +
+      '<button class="btn secondary" id="cancelBtn">Cancel</button></div>';
+  }
+  html += '</div>';
+
+  html += '<div class="card"><h2>Upload history</h2>';
+  if(state.uploads.length===0){
+    html += '<div class="empty">No uploads yet.</div>';
+  } else {
+    html += '<table><thead><tr><th>Week</th><th>Extension file</th><th>Queue file</th><th>Agent rows</th><th>Queues</th><th>Uploaded</th></tr></thead><tbody>';
+    state.uploads.slice(0,25).forEach(function(u){
+      html += '<tr><td>'+escapeHtml(u.weekEnding)+'</td><td>'+escapeHtml(u.extFilename)+'</td><td>'+escapeHtml(u.queueFilename)+
+        '</td><td>'+(u.extRows||0)+'</td><td>'+(u.queueCount||0)+'</td><td>'+new Date(u.uploadedAt).toLocaleString()+'</td></tr>';
+    });
+    html += '</tbody></table>';
+  }
+  html += '</div>';
+
+  root.innerHTML = html;
+
+  if(!state.pendingParse){
+    document.getElementById("parseBtn").addEventListener("click", handleParseClick);
+  } else {
+    document.getElementById("commitBtn").addEventListener("click", commitUpload);
+    document.getElementById("cancelBtn").addEventListener("click", cancelPending);
+  }
+}
+
+function renderMapping(){
+  var root = document.getElementById("tab-mapping");
+  var lineCodes = Object.keys(state.lines).sort();
+  var queueCodes = Object.keys(state.queues).sort();
+
+  var html = '<div class="card"><h2>PCC / agent lines</h2>';
+  if(lineCodes.length===0){ html += '<div class="empty">No lines yet — upload a week first.</div>'; }
+  else {
+    html += '<table id="lineMapTable"><thead><tr><th>Ext</th><th>Seen as</th><th>Clinic</th><th>Category</th><th></th></tr></thead><tbody>';
+    lineCodes.forEach(function(ext){
+      var l = state.lines[ext];
+      html += '<tr data-code="'+ext+'"><td>'+ext+'</td><td>'+escapeHtml(l.label||"")+'</td>' +
+        '<td><input type="text" data-field="clinic" value="'+escapeHtml(l.clinic||"")+'" /></td>' +
+        '<td><select data-field="category">' +
+          '<option value="pcc"'+(l.category==="pcc"?' selected':'')+'>PCC line</option>' +
+          '<option value="ignore"'+(l.category==="ignore"?' selected':'')+'>Not a clinic (ignore)</option>' +
+        '</select></td>' +
+        '<td><button class="btn sm secondary" data-action="save">Save</button></td></tr>';
+    });
+    html += '</tbody></table>';
+  }
+  html += '</div>';
+
+  html += '<div class="card"><h2>Queues</h2>';
+  if(queueCodes.length===0){ html += '<div class="empty">No queues yet — upload a week first.</div>'; }
+  else {
+    html += '<table id="queueMapTable"><thead><tr><th>Code</th><th>Seen as</th><th>Clinic</th><th>Category</th><th></th></tr></thead><tbody>';
+    queueCodes.forEach(function(code){
+      var q = state.queues[code];
+      html += '<tr data-code="'+code+'"><td>'+code+'</td><td>'+escapeHtml(q.label||"")+'</td>' +
+        '<td><input type="text" data-field="clinic" value="'+escapeHtml(q.clinic||"")+'" /></td>' +
+        '<td><select data-field="category">' +
+          '<option value="queue"'+(q.category==="queue"?' selected':'')+'>Queue</option>' +
+          '<option value="ignore"'+(q.category==="ignore"?' selected':'')+'>Not a clinic (ignore)</option>' +
+        '</select></td>' +
+        '<td><button class="btn sm secondary" data-action="save">Save</button></td></tr>';
+    });
+    html += '</tbody></table>';
+  }
+  html += '</div>';
+
+  root.innerHTML = html;
+
+  root.querySelectorAll('#lineMapTable tbody tr').forEach(function(tr){
+    tr.querySelector('[data-action=save]').addEventListener("click", async function(){
+      var ext = tr.getAttribute("data-code");
+      var clinic = tr.querySelector('input[data-field=clinic]').value.trim();
+      var category = tr.querySelector('select[data-field=category]').value;
+      var existing = state.lines[ext];
+      await persistLine(ext, {category:category, clinic:clinic, label:existing.label, updatedAt:new Date().toISOString()});
+      showToast("Saved ext " + ext);
+    });
+  });
+  root.querySelectorAll('#queueMapTable tbody tr').forEach(function(tr){
+    tr.querySelector('[data-action=save]').addEventListener("click", async function(){
+      var code = tr.getAttribute("data-code");
+      var clinic = tr.querySelector('input[data-field=clinic]').value.trim();
+      var category = tr.querySelector('select[data-field=category]').value;
+      var existing = state.queues[code];
+      await persistQueue(code, {category:category, clinic:clinic, label:existing.label, updatedAt:new Date().toISOString()});
+      showToast("Saved queue " + code);
+    });
+  });
+}
+
+function renderAll(){
+  renderWeekSelector();
+  renderOverview();
+  renderPccTable();
+  renderQueues();
+  renderUploadTab();
+  renderMapping();
+}
+
+/* ===================================================================
+ * 7. NAV
+ * =================================================================== */
+document.getElementById("nav").addEventListener("click", function(e){
+  var btn = e.target.closest("button[data-tab]");
+  if(!btn) return;
+  document.querySelectorAll("#nav button").forEach(function(b){ b.classList.remove("active"); });
+  btn.classList.add("active");
+  ["overview","table","queues","upload","mapping"].forEach(function(t){
+    document.getElementById("tab-"+t).style.display = (t===btn.getAttribute("data-tab")) ? "" : "none";
+  });
+  state.activeTab = btn.getAttribute("data-tab");
+});
+
+initDb();
+</script>
+</body>
+</html>
