@@ -94,6 +94,7 @@
     <button data-tab="overview" class="active">Overview</button>
     <button data-tab="table">PCC Table</button>
     <button data-tab="queues">Queue Coverage</button>
+    <button data-tab="trends">Queue Trends</button>
     <button data-tab="upload">Upload &amp; Review</button>
     <button data-tab="mapping">Line Mapping</button>
   </div>
@@ -101,6 +102,7 @@
   <div id="tab-overview"></div>
   <div id="tab-table" style="display:none;"></div>
   <div id="tab-queues" style="display:none;"></div>
+  <div id="tab-trends" style="display:none;"></div>
   <div id="tab-upload" style="display:none;"></div>
   <div id="tab-mapping" style="display:none;"></div>
 </div>
@@ -152,6 +154,10 @@ var state = {
   dbReady: false,
   pendingParse: null,
   selectedWeek: null,
+  overviewGranularity: "week",   // 'week' | 'month'
+  selectedMonth: null,
+  trendsQueue: null,
+  trendsGranularity: "week",     // 'week' | 'month'
   activeTab: "overview"
 };
 
@@ -337,6 +343,27 @@ function allWeeks(){
   return Object.keys(set).sort(); // ascending
 }
 
+var MONTH_NAMES = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+function monthKey(weekEnding){ return String(weekEnding||"").slice(0,7); } // "YYYY-MM"
+function monthLabel(mk){
+  var p = String(mk||"").split("-");
+  var idx = parseInt(p[1],10)-1;
+  return (MONTH_NAMES[idx]||mk) + " " + p[0];
+}
+function monthLabelShort(mk){
+  var p = String(mk||"").split("-");
+  var idx = parseInt(p[1],10)-1;
+  return (MONTH_NAMES[idx]||mk) + " '" + String(p[0]).slice(2);
+}
+function allMonths(){
+  var set = {};
+  allWeeks().forEach(function(w){ set[monthKey(w)] = true; });
+  return Object.keys(set).sort();
+}
+function weeksInMonth(mk){
+  return allWeeks().filter(function(w){ return monthKey(w)===mk; });
+}
+
 async function handleParseClick(){
   var weekEnding = document.getElementById("weekEndingInput").value;
   var extFile = document.getElementById("extStatsFile").files[0];
@@ -500,6 +527,41 @@ function totalsForWeek(week){
   return out;
 }
 
+function totalsForMonth(mk){
+  var out = {inboundAnswered:0, inboundUnanswered:0, outboundAnswered:0, outboundUnanswered:0, talkTimeSec:0};
+  if(!mk) return out;
+  weeksInMonth(mk).forEach(function(w){
+    var t = totalsForWeek(w);
+    out.inboundAnswered += t.inboundAnswered; out.inboundUnanswered += t.inboundUnanswered;
+    out.outboundAnswered += t.outboundAnswered; out.outboundUnanswered += t.outboundUnanswered;
+    out.talkTimeSec += t.talkTimeSec;
+  });
+  return out;
+}
+
+function queueTotalsForWeek(code, week){
+  var d = (state.queueWeekly[code]||{})[week];
+  return {received: d?d.received||0:0, serviced: d?d.serviced||0:0, unanswered: d?d.unanswered||0:0};
+}
+function queueTotalsForMonth(code, mk){
+  var out = {received:0, serviced:0, unanswered:0};
+  if(!mk) return out;
+  weeksInMonth(mk).forEach(function(w){
+    var d = (state.queueWeekly[code]||{})[w];
+    if(!d) return;
+    out.received += d.received||0; out.serviced += d.serviced||0; out.unanswered += d.unanswered||0;
+  });
+  return out;
+}
+function renderLegend(seriesDefs){
+  return '<div style="display:flex; gap:14px; flex-wrap:wrap; margin-bottom:8px; font-size:12px; color:var(--muted);">' +
+    seriesDefs.map(function(d){
+      return '<span style="display:inline-flex; align-items:center; gap:5px;">' +
+        '<span style="width:10px;height:10px;border-radius:50%;background:'+d.color+';display:inline-block;"></span>' +
+        escapeHtml(d.name) + '</span>';
+    }).join("") + '</div>';
+}
+
 /* ===================================================================
  * 6. RENDERING — tabs
  * =================================================================== */
@@ -525,21 +587,53 @@ function renderOverview(){
     root.innerHTML = '<div class="card"><div class="empty">No weeks uploaded yet — head to Upload &amp; Review to load your first Extension Statistics + Queue Performance pair.</div></div>';
     return;
   }
-  var week = state.selectedWeek || weeks[weeks.length-1];
-  var idx = weeks.indexOf(week);
-  var prevWeek = idx>0 ? weeks[idx-1] : null;
-  var cur = totalsForWeek(week);
-  var prev = totalsForWeek(prevWeek);
+
+  var granularity = state.overviewGranularity || "week";
+  var periods, period, idx, prevPeriod, cur, prev, periodLabel, labelFormatter;
+
+  if(granularity === "month"){
+    periods = allMonths();
+    if(!state.selectedMonth || periods.indexOf(state.selectedMonth)===-1) state.selectedMonth = periods[periods.length-1];
+    period = state.selectedMonth;
+    idx = periods.indexOf(period);
+    prevPeriod = idx>0 ? periods[idx-1] : null;
+    cur = totalsForMonth(period);
+    prev = totalsForMonth(prevPeriod);
+    periodLabel = monthLabel(period);
+    labelFormatter = monthLabelShort;
+  } else {
+    periods = weeks;
+    period = state.selectedWeek || periods[periods.length-1];
+    idx = periods.indexOf(period);
+    prevPeriod = idx>0 ? periods[idx-1] : null;
+    cur = totalsForWeek(period);
+    prev = totalsForWeek(prevPeriod);
+    periodLabel = "Week of " + period;
+    labelFormatter = function(w){ return String(w).slice(5); };
+  }
 
   function tile(label, value, deltaCur, deltaPrev){
     var d = pctDelta(deltaCur, deltaPrev);
     return '<div class="kpi"><div class="label">'+label+'</div><div class="value">'+value+'</div>'+
-      (prevWeek ? '<div class="delta '+d.cls+'">'+d.text+'</div>' : '') + '</div>';
+      (prevPeriod ? '<div class="delta '+d.cls+'">'+d.text+'</div>' : '') + '</div>';
   }
   var answerRate = (cur.inboundAnswered+cur.inboundUnanswered)>0 ?
     Math.round(100*cur.inboundAnswered/(cur.inboundAnswered+cur.inboundUnanswered)) : 0;
 
-  var html = '<div class="kpis">' +
+  var html = '<div class="row" style="margin-bottom:14px; align-items:flex-end;">' +
+    '<div class="field" style="margin-bottom:0;"><label>View by</label><select id="overviewGranularity">' +
+      '<option value="week"'+(granularity==="week"?' selected':'')+'>Week</option>' +
+      '<option value="month"'+(granularity==="month"?' selected':'')+'>Month</option>' +
+    '</select></div>';
+  if(granularity==="month"){
+    html += '<div class="field" style="margin-bottom:0;"><label>Month</label><select id="overviewPeriod">' +
+      periods.slice().reverse().map(function(p){
+        return '<option value="'+p+'"'+(p===period?' selected':'')+'>'+monthLabel(p)+'</option>';
+      }).join("") + '</select></div>';
+  }
+  html += '</div>';
+
+  html += '<div class="kpis">' +
     tile("Inbound Answered", cur.inboundAnswered, cur.inboundAnswered, prev.inboundAnswered) +
     tile("Inbound Unanswered", cur.inboundUnanswered, cur.inboundUnanswered, prev.inboundUnanswered) +
     tile("Outbound Answered", cur.outboundAnswered, cur.outboundAnswered, prev.outboundAnswered) +
@@ -547,29 +641,122 @@ function renderOverview(){
     '<div class="kpi"><div class="label">Answer Rate</div><div class="value">'+answerRate+'%</div></div>' +
     '</div>';
 
-  html += '<div class="card"><h2>Inbound calls — last weeks</h2><div id="chartInboundWrap"></div></div>';
-  html += '<div class="card"><h2>Outbound calls — last weeks</h2><div id="chartOutboundWrap"></div></div>';
+  var periodNoun = granularity==="month" ? "months" : "weeks";
+  html += '<div class="card"><h2>Inbound calls — last '+periodNoun+'</h2><div id="chartInboundWrap"></div></div>';
+  html += '<div class="card"><h2>Outbound calls — last '+periodNoun+'</h2><div id="chartOutboundWrap"></div></div>';
   root.innerHTML = html;
 
-  var lastWeeks = weeks.slice(-10);
+  document.getElementById("overviewGranularity").addEventListener("change", function(e){
+    state.overviewGranularity = e.target.value;
+    renderOverview();
+  });
+  if(granularity==="month"){
+    document.getElementById("overviewPeriod").addEventListener("change", function(e){
+      state.selectedMonth = e.target.value;
+      renderOverview();
+    });
+  }
+
+  var lastPeriods = periods.slice(-12);
   var inboundAns = [], inboundUnans = [], outAns = [], outUnans = [];
-  lastWeeks.forEach(function(w){
-    var t = totalsForWeek(w);
+  lastPeriods.forEach(function(p){
+    var t = granularity==="month" ? totalsForMonth(p) : totalsForWeek(p);
     inboundAns.push(t.inboundAnswered); inboundUnans.push(t.inboundUnanswered);
     outAns.push(t.outboundAnswered); outUnans.push(t.outboundUnanswered);
   });
-  drawGroupedBars(document.getElementById("chartInboundWrap"), lastWeeks,
+  drawChart(document.getElementById("chartInboundWrap"), lastPeriods,
     [{key:"ans", color:"var(--good)", name:"Answered"}, {key:"unans", color:"var(--bad)", name:"Unanswered"}],
-    {ans:inboundAns, unans:inboundUnans});
-  drawGroupedBars(document.getElementById("chartOutboundWrap"), lastWeeks,
+    {ans:inboundAns, unans:inboundUnans}, {type:"bar", labelFormatter:labelFormatter});
+  drawChart(document.getElementById("chartOutboundWrap"), lastPeriods,
     [{key:"ans", color:"var(--accent)", name:"Answered"}, {key:"unans", color:"var(--warn)", name:"Unanswered"}],
-    {ans:outAns, unans:outUnans});
+    {ans:outAns, unans:outUnans}, {type:"bar", labelFormatter:labelFormatter});
 }
 
-function drawGroupedBars(container, labels, seriesDefs, series){
+function renderTrends(){
+  var root = document.getElementById("tab-trends");
+  var queueCodes = Object.keys(state.queueWeekly).filter(function(c){
+    var q = state.queues[c];
+    return !q || q.category !== "ignore";
+  });
+  if(queueCodes.length===0){
+    root.innerHTML = '<div class="card"><div class="empty">No queue data yet — upload a week first.</div></div>';
+    return;
+  }
+  queueCodes.sort(function(a,b){
+    var ca = (state.queues[a] && state.queues[a].clinic) || a;
+    var cb = (state.queues[b] && state.queues[b].clinic) || b;
+    return ca.localeCompare(cb);
+  });
+  if(!state.trendsQueue || queueCodes.indexOf(state.trendsQueue)===-1) state.trendsQueue = queueCodes[0];
+  var granularity = state.trendsGranularity || "week";
+  var code = state.trendsQueue;
+
+  var html = '<div class="card"><h2>Queue performance over time</h2>';
+  html += '<div class="row" style="margin-bottom:14px; align-items:flex-end;">';
+  html += '<div class="field" style="margin-bottom:0;"><label>Queue</label><select id="trendsQueueSelect">' +
+    queueCodes.map(function(c){
+      var q = state.queues[c] || {};
+      var label = (q.clinic ? q.clinic : ("Queue "+c)) + (q.label ? (" — "+q.label) : "");
+      return '<option value="'+c+'"'+(c===code?' selected':'')+'>'+escapeHtml(label)+'</option>';
+    }).join("") + '</select></div>';
+  html += '<div class="field" style="margin-bottom:0;"><label>View by</label><select id="trendsGranularity">' +
+    '<option value="week"'+(granularity==="week"?' selected':'')+'>Week</option>' +
+    '<option value="month"'+(granularity==="month"?' selected':'')+'>Month</option>' +
+    '</select></div>';
+  html += '</div>';
+  html += renderLegend([
+    {color:"var(--accent)", name:"Received"},
+    {color:"var(--good)", name:"Serviced"},
+    {color:"var(--bad)", name:"Unanswered"}
+  ]);
+  html += '<div id="trendsChartWrap"></div>';
+  html += '<div id="trendsTableWrap" style="margin-top:14px;"></div>';
+  html += '</div>';
+  root.innerHTML = html;
+
+  document.getElementById("trendsQueueSelect").addEventListener("change", function(e){
+    state.trendsQueue = e.target.value;
+    renderTrends();
+  });
+  document.getElementById("trendsGranularity").addEventListener("change", function(e){
+    state.trendsGranularity = e.target.value;
+    renderTrends();
+  });
+
+  var periods = granularity==="month" ? allMonths() : allWeeks();
+  var labelFormatter = granularity==="month" ? monthLabelShort : function(w){ return String(w).slice(5); };
+  var received = [], serviced = [], unanswered = [];
+  periods.forEach(function(p){
+    var t = granularity==="month" ? queueTotalsForMonth(code, p) : queueTotalsForWeek(code, p);
+    received.push(t.received); serviced.push(t.serviced); unanswered.push(t.unanswered);
+  });
+
+  drawChart(document.getElementById("trendsChartWrap"), periods,
+    [{key:"received", color:"var(--accent)", name:"Received"},
+     {key:"serviced", color:"var(--good)", name:"Serviced"},
+     {key:"unanswered", color:"var(--bad)", name:"Unanswered"}],
+    {received:received, serviced:serviced, unanswered:unanswered},
+    {type:"line", labelFormatter:labelFormatter});
+
+  var tableHtml = '<table><thead><tr><th>'+(granularity==="month"?"Month":"Week")+
+    '</th><th>Received</th><th>Serviced</th><th>Unanswered</th><th>Answer Rate</th></tr></thead><tbody>';
+  for(var i=periods.length-1; i>=0; i--){
+    var r = received[i], s = serviced[i], u = unanswered[i];
+    var rate = r>0 ? Math.round(100*s/r)+"%" : "—";
+    var lbl = granularity==="month" ? monthLabel(periods[i]) : ("Week of "+periods[i]);
+    tableHtml += '<tr><td>'+lbl+'</td><td>'+r+'</td><td>'+s+'</td><td>'+u+'</td><td>'+rate+'</td></tr>';
+  }
+  tableHtml += '</tbody></table>';
+  document.getElementById("trendsTableWrap").innerHTML = tableHtml;
+}
+
+function drawChart(container, labels, seriesDefs, series, opts){
+  opts = opts || {};
+  var type = opts.type || "bar";
+  var labelFormatter = opts.labelFormatter || function(l){ return String(l).slice(5); };
   container.innerHTML = "";
-  var W = Math.max(container.clientWidth || 540, 320), H = 180;
-  var pad = {l:34, r:10, t:10, b:26};
+  var W = Math.max(container.clientWidth || 540, 320), H = 190;
+  var pad = {l:34, r:14, t:14, b:28};
   var svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
   svg.setAttribute("class", "chart");
   svg.setAttribute("width", "100%"); svg.setAttribute("height", H);
@@ -581,7 +768,7 @@ function drawGroupedBars(container, labels, seriesDefs, series){
     var msgText = document.createElementNS("http://www.w3.org/2000/svg","text");
     msgText.setAttribute("x", W/2); msgText.setAttribute("y", H/2);
     msgText.setAttribute("text-anchor","middle"); msgText.setAttribute("font-size","13");
-    msgText.textContent = labels.length===0 ? "No weeks uploaded yet" : "Nothing recorded here for the current filters";
+    msgText.textContent = labels.length===0 ? "No data yet" : "Nothing recorded here for the current filters";
     svg.appendChild(msgText);
     container.appendChild(svg);
     return;
@@ -589,13 +776,15 @@ function drawGroupedBars(container, labels, seriesDefs, series){
 
   var maxVal = 1;
   labels.forEach(function(l,i){
-    var sum = 0;
-    seriesDefs.forEach(function(def){ sum = Math.max(sum, series[def.key][i]||0); });
-    maxVal = Math.max(maxVal, sum);
+    if(type==="bar"){
+      var sum = 0;
+      seriesDefs.forEach(function(def){ sum = Math.max(sum, series[def.key][i]||0); });
+      maxVal = Math.max(maxVal, sum);
+    } else {
+      seriesDefs.forEach(function(def){ maxVal = Math.max(maxVal, series[def.key][i]||0); });
+    }
   });
   var plotW = W - pad.l - pad.r, plotH = H - pad.t - pad.b;
-  var groupW = plotW / labels.length;
-  var barW = Math.min(16, (groupW - 10) / seriesDefs.length);
 
   // gridlines
   [0, 0.5, 1].forEach(function(f){
@@ -607,30 +796,71 @@ function drawGroupedBars(container, labels, seriesDefs, series){
     svg.appendChild(line);
   });
 
-  labels.forEach(function(wk, i){
-    var gx = pad.l + i*groupW + (groupW - barW*seriesDefs.length)/2;
-    seriesDefs.forEach(function(def, si){
-      var val = series[def.key][i]||0;
-      var bh = plotH * (val/maxVal);
-      var rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
-      rect.setAttribute("x", gx + si*barW);
-      rect.setAttribute("y", pad.t + plotH - bh);
-      rect.setAttribute("width", Math.max(1,barW-2));
-      rect.setAttribute("height", Math.max(0,bh));
-      rect.setAttribute("fill", def.color);
-      rect.setAttribute("rx", "2");
-      var title = document.createElementNS("http://www.w3.org/2000/svg","title");
-      title.textContent = def.name + " — " + wk + ": " + val;
-      rect.appendChild(title);
-      svg.appendChild(rect);
+  if(type === "bar"){
+    var groupW = plotW / labels.length;
+    var barW = Math.min(16, (groupW - 10) / seriesDefs.length);
+    labels.forEach(function(wk, i){
+      var gx = pad.l + i*groupW + (groupW - barW*seriesDefs.length)/2;
+      seriesDefs.forEach(function(def, si){
+        var val = series[def.key][i]||0;
+        var bh = plotH * (val/maxVal);
+        var rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+        rect.setAttribute("x", gx + si*barW);
+        rect.setAttribute("y", pad.t + plotH - bh);
+        rect.setAttribute("width", Math.max(1,barW-2));
+        rect.setAttribute("height", Math.max(0,bh));
+        rect.setAttribute("fill", def.color);
+        rect.setAttribute("rx", "2");
+        var title = document.createElementNS("http://www.w3.org/2000/svg","title");
+        title.textContent = def.name + " — " + labelFormatter(wk) + ": " + val;
+        rect.appendChild(title);
+        svg.appendChild(rect);
+      });
+      var lbl = document.createElementNS("http://www.w3.org/2000/svg", "text");
+      lbl.setAttribute("x", gx + (groupW-10)/2);
+      lbl.setAttribute("y", H-8);
+      lbl.setAttribute("text-anchor","middle");
+      lbl.textContent = labelFormatter(wk);
+      svg.appendChild(lbl);
     });
-    var lbl = document.createElementNS("http://www.w3.org/2000/svg", "text");
-    lbl.setAttribute("x", gx + (groupW-10)/2);
-    lbl.setAttribute("y", H-8);
-    lbl.setAttribute("text-anchor","middle");
-    lbl.textContent = wk.slice(5); // MM-DD
-    svg.appendChild(lbl);
-  });
+  } else {
+    var stepX = labels.length>1 ? plotW/(labels.length-1) : 0;
+    seriesDefs.forEach(function(def){
+      var points = labels.map(function(l,i){
+        var val = series[def.key][i]||0;
+        var x = pad.l + (labels.length>1 ? i*stepX : plotW/2);
+        var y = pad.t + plotH - plotH*(val/maxVal);
+        return {x:x,y:y,val:val};
+      });
+      var pathD = points.map(function(p,i){ return (i===0?"M":"L")+p.x.toFixed(1)+","+p.y.toFixed(1); }).join(" ");
+      var path = document.createElementNS("http://www.w3.org/2000/svg","path");
+      path.setAttribute("d", pathD);
+      path.setAttribute("fill","none");
+      path.setAttribute("stroke", def.color);
+      path.setAttribute("stroke-width","2");
+      svg.appendChild(path);
+      points.forEach(function(p, i){
+        var dot = document.createElementNS("http://www.w3.org/2000/svg","circle");
+        dot.setAttribute("cx", p.x); dot.setAttribute("cy", p.y); dot.setAttribute("r","3");
+        dot.setAttribute("fill", def.color);
+        var title = document.createElementNS("http://www.w3.org/2000/svg","title");
+        title.textContent = def.name + " — " + labelFormatter(labels[i]) + ": " + p.val;
+        dot.appendChild(title);
+        svg.appendChild(dot);
+      });
+    });
+    var maxLabels = Math.floor(plotW/50) || 1;
+    var skip = Math.max(1, Math.ceil(labels.length/maxLabels));
+    labels.forEach(function(l,i){
+      if(i % skip !== 0 && i !== labels.length-1) return;
+      var x = pad.l + (labels.length>1 ? i*stepX : plotW/2);
+      var lbl = document.createElementNS("http://www.w3.org/2000/svg", "text");
+      lbl.setAttribute("x", x); lbl.setAttribute("y", H-8);
+      lbl.setAttribute("text-anchor","middle");
+      lbl.textContent = labelFormatter(l);
+      svg.appendChild(lbl);
+    });
+  }
   container.appendChild(svg);
 }
 
@@ -857,6 +1087,7 @@ function renderAll(){
   renderOverview();
   renderPccTable();
   renderQueues();
+  renderTrends();
   renderUploadTab();
   renderMapping();
 }
@@ -869,7 +1100,7 @@ document.getElementById("nav").addEventListener("click", function(e){
   if(!btn) return;
   document.querySelectorAll("#nav button").forEach(function(b){ b.classList.remove("active"); });
   btn.classList.add("active");
-  ["overview","table","queues","upload","mapping"].forEach(function(t){
+  ["overview","table","queues","trends","upload","mapping"].forEach(function(t){
     document.getElementById("tab-"+t).style.display = (t===btn.getAttribute("data-tab")) ? "" : "none";
   });
   state.activeTab = btn.getAttribute("data-tab");
