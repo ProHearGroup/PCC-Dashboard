@@ -158,6 +158,7 @@ var state = {
   selectedMonth: null,
   trendsQueue: null,
   trendsGranularity: "week",     // 'week' | 'month'
+  coverageFilter: "all",          // 'all' | 'covering'
   activeTab: "overview"
 };
 
@@ -978,32 +979,64 @@ function renderQueues(){
     return;
   }
 
+  var coverageFilter = state.coverageFilter || "all";
+
   var html = '<div class="card"><h2>Queue coverage — week of ' + week + '</h2>' +
+    '<div class="row" style="margin-bottom:10px; align-items:flex-end;">' +
+    '<div class="field" style="margin-bottom:0;"><label>Show</label><select id="coverageFilterSelect">' +
+      '<option value="all"'+(coverageFilter==="all"?' selected':'')+'>All agents</option>' +
+      '<option value="covering"'+(coverageFilter==="covering"?' selected':'')+'>Covering only</option>' +
+    '</select></div>' +
+    '</div>' +
     '<div class="muted" style="margin-bottom:12px;">Rows marked <span class="buddyTag">covering</span> are an agent from a different clinic helping answer this queue.</div>';
+
+  var anyQueueShown = false;
   codes.forEach(function(code){
     var qd = state.queueWeekly[code][week];
     var qInfo = state.queues[code] || {};
     var qClinic = qInfo.clinic || "(unmapped queue "+code+")";
+
+    var agentsSorted = (qd.agents||[]).slice().sort(function(a,b){ return b.servicedCalls - a.servicedCalls; });
+    var agentsWithFlag = agentsSorted.map(function(a){
+      var agentLine = state.lines[a.ext] || {};
+      var agentClinic = agentLine.clinic || "";
+      var isBuddy = agentClinic && qClinic && agentClinic !== qClinic && agentLine.category!=="ignore";
+      return {a:a, agentLine:agentLine, agentClinic:agentClinic, isBuddy:isBuddy};
+    });
+    var visibleAgents = coverageFilter==="covering" ?
+      agentsWithFlag.filter(function(x){ return x.isBuddy; }) : agentsWithFlag;
+
+    if(coverageFilter==="covering" && visibleAgents.length===0) return; // hide queues with no coverage
+    anyQueueShown = true;
+
     html += '<div class="queueBlock"><div class="queueHead"><span class="qname">'+escapeHtml(qClinic)+'</span>' +
       '<span class="muted">Queue '+code+' · '+escapeHtml(qInfo.label||"")+'</span></div>';
     html += '<table><thead><tr><th>Received</th><th>Serviced</th><th>Unanswered</th></tr></thead><tbody>' +
       '<tr><td>'+qd.received+'</td><td>'+qd.serviced+'</td><td>'+qd.unanswered+'</td></tr></tbody></table>';
-    if(qd.agents && qd.agents.length){
+    if(visibleAgents.length){
       html += '<table style="margin-top:6px;"><thead><tr><th>Agent</th><th>Ext</th><th>Clinic</th><th>Serviced</th><th>Talk Time</th></tr></thead><tbody>';
-      qd.agents.slice().sort(function(a,b){ return b.servicedCalls - a.servicedCalls; }).forEach(function(a){
-        var agentLine = state.lines[a.ext] || {};
-        var agentClinic = agentLine.clinic || "";
-        var isBuddy = agentClinic && qClinic && agentClinic !== qClinic && agentLine.category!=="ignore";
-        html += '<tr><td>'+escapeHtml(agentLine.label||"")+'</td><td>'+a.ext+'</td>' +
-          '<td>'+escapeHtml(agentClinic||"—")+(isBuddy?'<span class="buddyTag">covering</span>':'')+'</td>' +
-          '<td>'+a.servicedCalls+'</td><td>'+fmtHMS(a.talkTimeSec)+'</td></tr>';
+      visibleAgents.forEach(function(x){
+        html += '<tr><td>'+escapeHtml(x.agentLine.label||"")+'</td><td>'+x.a.ext+'</td>' +
+          '<td>'+escapeHtml(x.agentClinic||"—")+(x.isBuddy?'<span class="buddyTag">covering</span>':'')+'</td>' +
+          '<td>'+x.a.servicedCalls+'</td><td>'+fmtHMS(x.a.talkTimeSec)+'</td></tr>';
       });
       html += '</tbody></table>';
+    } else if(coverageFilter!=="covering"){
+      html += '<div class="empty">No agent detail for this queue.</div>';
     }
     html += '</div>';
   });
+
+  if(!anyQueueShown){
+    html += '<div class="empty">No queues had cross-clinic coverage this week.</div>';
+  }
   html += '</div>';
   root.innerHTML = html;
+
+  document.getElementById("coverageFilterSelect").addEventListener("change", function(e){
+    state.coverageFilter = e.target.value;
+    renderQueues();
+  });
 }
 
 function renderUploadTab(){
