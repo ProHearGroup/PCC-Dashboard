@@ -553,6 +553,23 @@ function queueTotalsForMonth(code, mk){
   });
   return out;
 }
+function clinicOutboundForWeek(clinic, week){
+  if(!clinic || !week) return 0;
+  var total = 0;
+  Object.keys(state.lines).forEach(function(ext){
+    var l = state.lines[ext];
+    if(!l || l.clinic !== clinic || l.category==="ignore") return;
+    var d = (state.weekly[ext]||{})[week];
+    if(d) total += d.outboundAnswered||0;
+  });
+  return total;
+}
+function clinicOutboundForMonth(clinic, mk){
+  if(!clinic || !mk) return 0;
+  var total = 0;
+  weeksInMonth(mk).forEach(function(w){ total += clinicOutboundForWeek(clinic, w); });
+  return total;
+}
 function renderLegend(seriesDefs){
   return '<div style="display:flex; gap:14px; flex-wrap:wrap; margin-bottom:8px; font-size:12px; color:var(--muted);">' +
     seriesDefs.map(function(d){
@@ -690,6 +707,8 @@ function renderTrends(){
   if(!state.trendsQueue || queueCodes.indexOf(state.trendsQueue)===-1) state.trendsQueue = queueCodes[0];
   var granularity = state.trendsGranularity || "week";
   var code = state.trendsQueue;
+  var qInfo = state.queues[code] || {};
+  var qClinic = qInfo.clinic || "";
 
   var html = '<div class="card"><h2>Queue performance over time</h2>';
   html += '<div class="row" style="margin-bottom:14px; align-items:flex-end;">';
@@ -704,10 +723,14 @@ function renderTrends(){
     '<option value="month"'+(granularity==="month"?' selected':'')+'>Month</option>' +
     '</select></div>';
   html += '</div>';
+  if(!qClinic){
+    html += '<div class="muted" style="margin-bottom:10px;">This queue isn\'t mapped to a clinic yet, so outbound calls made can\'t be matched to it — map it under Line Mapping to see that line.</div>';
+  }
   html += renderLegend([
     {color:"var(--accent)", name:"Received"},
     {color:"var(--good)", name:"Serviced"},
-    {color:"var(--bad)", name:"Unanswered"}
+    {color:"var(--bad)", name:"Unanswered"},
+    {color:"var(--warn)", name:"Outbound Calls Made"}
   ]);
   html += '<div id="trendsChartWrap"></div>';
   html += '<div id="trendsTableWrap" style="margin-top:14px;"></div>';
@@ -725,26 +748,28 @@ function renderTrends(){
 
   var periods = granularity==="month" ? allMonths() : allWeeks();
   var labelFormatter = granularity==="month" ? monthLabelShort : function(w){ return String(w).slice(5); };
-  var received = [], serviced = [], unanswered = [];
+  var received = [], serviced = [], unanswered = [], outbound = [];
   periods.forEach(function(p){
     var t = granularity==="month" ? queueTotalsForMonth(code, p) : queueTotalsForWeek(code, p);
     received.push(t.received); serviced.push(t.serviced); unanswered.push(t.unanswered);
+    outbound.push(granularity==="month" ? clinicOutboundForMonth(qClinic, p) : clinicOutboundForWeek(qClinic, p));
   });
 
   drawChart(document.getElementById("trendsChartWrap"), periods,
     [{key:"received", color:"var(--accent)", name:"Received"},
      {key:"serviced", color:"var(--good)", name:"Serviced"},
-     {key:"unanswered", color:"var(--bad)", name:"Unanswered"}],
-    {received:received, serviced:serviced, unanswered:unanswered},
+     {key:"unanswered", color:"var(--bad)", name:"Unanswered"},
+     {key:"outbound", color:"var(--warn)", name:"Outbound Calls Made"}],
+    {received:received, serviced:serviced, unanswered:unanswered, outbound:outbound},
     {type:"line", labelFormatter:labelFormatter});
 
   var tableHtml = '<table><thead><tr><th>'+(granularity==="month"?"Month":"Week")+
-    '</th><th>Received</th><th>Serviced</th><th>Unanswered</th><th>Answer Rate</th></tr></thead><tbody>';
+    '</th><th>Received</th><th>Serviced</th><th>Unanswered</th><th>Answer Rate</th><th>Outbound Calls Made</th></tr></thead><tbody>';
   for(var i=periods.length-1; i>=0; i--){
-    var r = received[i], s = serviced[i], u = unanswered[i];
+    var r = received[i], s = serviced[i], u = unanswered[i], ob = outbound[i];
     var rate = r>0 ? Math.round(100*s/r)+"%" : "—";
     var lbl = granularity==="month" ? monthLabel(periods[i]) : ("Week of "+periods[i]);
-    tableHtml += '<tr><td>'+lbl+'</td><td>'+r+'</td><td>'+s+'</td><td>'+u+'</td><td>'+rate+'</td></tr>';
+    tableHtml += '<tr><td>'+lbl+'</td><td>'+r+'</td><td>'+s+'</td><td>'+u+'</td><td>'+rate+'</td><td>'+ob+'</td></tr>';
   }
   tableHtml += '</tbody></table>';
   document.getElementById("trendsTableWrap").innerHTML = tableHtml;
