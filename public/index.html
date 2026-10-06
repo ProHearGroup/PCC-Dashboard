@@ -653,8 +653,7 @@ function renderOverview(){
   html += '<div class="kpis">' +
     tile("Inbound Answered", cur.inboundAnswered, cur.inboundAnswered, prev.inboundAnswered) +
     tile("Inbound Unanswered", cur.inboundUnanswered, cur.inboundUnanswered, prev.inboundUnanswered) +
-    tile("Outbound Answered", cur.outboundAnswered, cur.outboundAnswered, prev.outboundAnswered) +
-    tile("Outbound Unanswered", cur.outboundUnanswered, cur.outboundUnanswered, prev.outboundUnanswered) +
+    tile("Outbound Calls Made", cur.outboundAnswered, cur.outboundAnswered, prev.outboundAnswered) +
     '<div class="kpi"><div class="label">Answer Rate</div><div class="value">'+answerRate+'%</div></div>' +
     '</div>';
 
@@ -675,18 +674,18 @@ function renderOverview(){
   }
 
   var lastPeriods = periods.slice(-12);
-  var inboundAns = [], inboundUnans = [], outAns = [], outUnans = [];
+  var inboundAns = [], inboundUnans = [], outAns = [];
   lastPeriods.forEach(function(p){
     var t = granularity==="month" ? totalsForMonth(p) : totalsForWeek(p);
     inboundAns.push(t.inboundAnswered); inboundUnans.push(t.inboundUnanswered);
-    outAns.push(t.outboundAnswered); outUnans.push(t.outboundUnanswered);
+    outAns.push(t.outboundAnswered);
   });
   drawChart(document.getElementById("chartInboundWrap"), lastPeriods,
     [{key:"ans", color:"var(--good)", name:"Answered"}, {key:"unans", color:"var(--bad)", name:"Unanswered"}],
-    {ans:inboundAns, unans:inboundUnans}, {type:"bar", labelFormatter:labelFormatter});
+    {ans:inboundAns, unans:inboundUnans}, {type:"bar", labelFormatter:labelFormatter, showValues:true});
   drawChart(document.getElementById("chartOutboundWrap"), lastPeriods,
-    [{key:"ans", color:"var(--accent)", name:"Answered"}, {key:"unans", color:"var(--warn)", name:"Unanswered"}],
-    {ans:outAns, unans:outUnans}, {type:"bar", labelFormatter:labelFormatter});
+    [{key:"ans", color:"var(--accent)", name:"Outbound Calls Made"}],
+    {ans:outAns}, {type:"bar", labelFormatter:labelFormatter, showValues:true});
 }
 
 function renderTrends(){
@@ -781,7 +780,7 @@ function drawChart(container, labels, seriesDefs, series, opts){
   var labelFormatter = opts.labelFormatter || function(l){ return String(l).slice(5); };
   container.innerHTML = "";
   var W = Math.max(container.clientWidth || 540, 320), H = 190;
-  var pad = {l:34, r:14, t:14, b:28};
+  var pad = {l:34, r:14, t:(opts.showValues ? 24 : 14), b:28};
   var svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
   svg.setAttribute("class", "chart");
   svg.setAttribute("width", "100%"); svg.setAttribute("height", H);
@@ -823,15 +822,17 @@ function drawChart(container, labels, seriesDefs, series, opts){
 
   if(type === "bar"){
     var groupW = plotW / labels.length;
-    var barW = Math.min(16, (groupW - 10) / seriesDefs.length);
+    var barW = Math.min(seriesDefs.length===1 ? 28 : 16, (groupW - 10) / seriesDefs.length);
     labels.forEach(function(wk, i){
       var gx = pad.l + i*groupW + (groupW - barW*seriesDefs.length)/2;
       seriesDefs.forEach(function(def, si){
         var val = series[def.key][i]||0;
         var bh = plotH * (val/maxVal);
+        var barX = gx + si*barW;
+        var barTopY = pad.t + plotH - bh;
         var rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
-        rect.setAttribute("x", gx + si*barW);
-        rect.setAttribute("y", pad.t + plotH - bh);
+        rect.setAttribute("x", barX);
+        rect.setAttribute("y", barTopY);
         rect.setAttribute("width", Math.max(1,barW-2));
         rect.setAttribute("height", Math.max(0,bh));
         rect.setAttribute("fill", def.color);
@@ -840,6 +841,17 @@ function drawChart(container, labels, seriesDefs, series, opts){
         title.textContent = def.name + " — " + labelFormatter(wk) + ": " + val;
         rect.appendChild(title);
         svg.appendChild(rect);
+        if(opts.showValues){
+          var vlbl = document.createElementNS("http://www.w3.org/2000/svg", "text");
+          vlbl.setAttribute("x", barX + Math.max(1,barW-2)/2);
+          vlbl.setAttribute("y", Math.max(10, barTopY - 4));
+          vlbl.setAttribute("text-anchor","middle");
+          vlbl.setAttribute("font-size","10.5");
+          vlbl.setAttribute("font-weight","600");
+          vlbl.setAttribute("fill", def.color);
+          vlbl.textContent = val;
+          svg.appendChild(vlbl);
+        }
       });
       var lbl = document.createElementNS("http://www.w3.org/2000/svg", "text");
       lbl.setAttribute("x", gx + (groupW-10)/2);
