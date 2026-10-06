@@ -493,13 +493,14 @@ function escapeHtml(s){
     return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];
   });
 }
-function pctDelta(cur, prev){
+function pctDelta(cur, prev, noun){
+  noun = noun || "week";
   if(prev===0 && cur===0) return {text:"—", cls:"flat"};
   if(prev===0) return {text:"new", cls:"up"};
   var d = ((cur-prev)/prev)*100;
   var cls = d>0.5 ? "up" : (d<-0.5 ? "down" : "flat");
   var sign = d>0 ? "+" : "";
-  return {text: sign + d.toFixed(0) + "% vs prior week", cls:cls};
+  return {text: sign + d.toFixed(0) + "% vs prior " + noun, cls:cls};
 }
 
 function weekLineClinic(ext){
@@ -610,28 +611,30 @@ function renderOverview(){
   var periods, period, idx, prevPeriod, cur, prev, periodLabel, labelFormatter;
 
   if(granularity === "month"){
-    periods = allMonths();
-    if(!state.selectedMonth || periods.indexOf(state.selectedMonth)===-1) state.selectedMonth = periods[periods.length-1];
+    var allMonthPeriods = allMonths();
+    if(!state.selectedMonth || allMonthPeriods.indexOf(state.selectedMonth)===-1) state.selectedMonth = allMonthPeriods[allMonthPeriods.length-1];
     period = state.selectedMonth;
-    idx = periods.indexOf(period);
-    prevPeriod = idx>0 ? periods[idx-1] : null;
+    idx = allMonthPeriods.indexOf(period);
+    prevPeriod = idx>0 ? allMonthPeriods[idx-1] : null;
     cur = totalsForMonth(period);
     prev = totalsForMonth(prevPeriod);
     periodLabel = monthLabel(period);
     labelFormatter = monthLabelShort;
+    periods = allMonthPeriods.filter(function(p){ return p <= period; });
   } else {
-    periods = weeks;
-    period = state.selectedWeek || periods[periods.length-1];
-    idx = periods.indexOf(period);
-    prevPeriod = idx>0 ? periods[idx-1] : null;
+    period = state.selectedWeek || weeks[weeks.length-1];
+    idx = weeks.indexOf(period);
+    prevPeriod = idx>0 ? weeks[idx-1] : null;
     cur = totalsForWeek(period);
     prev = totalsForWeek(prevPeriod);
     periodLabel = "Week of " + period;
     labelFormatter = function(w){ return String(w).slice(5); };
+    periods = weeks.filter(function(p){ return p <= period; });
   }
 
+  var deltaNoun = granularity==="month" ? "month" : "week";
   function tile(label, value, deltaCur, deltaPrev){
-    var d = pctDelta(deltaCur, deltaPrev);
+    var d = pctDelta(deltaCur, deltaPrev, deltaNoun);
     return '<div class="kpi"><div class="label">'+label+'</div><div class="value">'+value+'</div>'+
       (prevPeriod ? '<div class="delta '+d.cls+'">'+d.text+'</div>' : '') + '</div>';
   }
@@ -659,8 +662,9 @@ function renderOverview(){
     '</div>';
 
   var periodNoun = granularity==="month" ? "months" : "weeks";
-  html += '<div class="card"><h2>Inbound calls — last '+periodNoun+'</h2><div id="chartInboundWrap"></div></div>';
-  html += '<div class="card"><h2>Outbound calls — last '+periodNoun+'</h2><div id="chartOutboundWrap"></div></div>';
+  var windowNote = '<div class="muted" style="margin-bottom:10px;">Showing the 12 '+periodNoun+' through '+periodLabel+'.</div>';
+  html += '<div class="card"><h2>Inbound calls — last '+periodNoun+'</h2>'+windowNote+'<div id="chartInboundWrap"></div></div>';
+  html += '<div class="card"><h2>Outbound calls — last '+periodNoun+'</h2>'+windowNote+'<div id="chartOutboundWrap"></div></div>';
   root.innerHTML = html;
 
   document.getElementById("overviewGranularity").addEventListener("change", function(e){
@@ -710,7 +714,14 @@ function renderTrends(){
   var qInfo = state.queues[code] || {};
   var qClinic = qInfo.clinic || "";
 
-  var html = '<div class="card"><h2>Queue performance over time</h2>';
+  var allW = allWeeks();
+  var anchorWeek = state.selectedWeek && allW.indexOf(state.selectedWeek)!==-1 ? state.selectedWeek : allW[allW.length-1];
+  var anchorMonth = monthKey(anchorWeek);
+
+  var html = '<div class="card"><h2>Queue performance over time</h2>' +
+    '<div class="muted" style="margin-bottom:10px;">Showing the 12 '+(granularity==="month"?"months":"weeks")+' through '+
+    (granularity==="month" ? monthLabel(anchorMonth) : ("week of "+anchorWeek)) +
+    ' — use the "Week of" selector at the top right to move this window.</div>';
   html += '<div class="row" style="margin-bottom:14px; align-items:flex-end;">';
   html += '<div class="field" style="margin-bottom:0;"><label>Queue</label><select id="trendsQueueSelect">' +
     queueCodes.map(function(c){
@@ -749,7 +760,9 @@ function renderTrends(){
     renderTrends();
   });
 
-  var periods = granularity==="month" ? allMonths() : allWeeks();
+  var periods = granularity==="month" ?
+    allMonths().filter(function(mk){ return mk <= anchorMonth; }) :
+    allW.filter(function(w){ return w <= anchorWeek; });
   var labelFormatter = granularity==="month" ? monthLabelShort : function(w){ return String(w).slice(5); };
   var received = [], serviced = [], unanswered = [], outbound = [];
   periods.forEach(function(p){
