@@ -608,20 +608,21 @@ function renderOverview(){
   }
 
   var granularity = state.overviewGranularity || "week";
-  var periods, period, idx, prevPeriod, cur, prev, periodLabel, labelFormatter;
+  var periods, windowPeriods, period, idx, prevPeriod, cur, prev, periodLabel, labelFormatter;
 
   if(granularity === "month"){
-    var allMonthPeriods = allMonths();
-    if(!state.selectedMonth || allMonthPeriods.indexOf(state.selectedMonth)===-1) state.selectedMonth = allMonthPeriods[allMonthPeriods.length-1];
+    periods = allMonths();
+    if(!state.selectedMonth || periods.indexOf(state.selectedMonth)===-1) state.selectedMonth = periods[periods.length-1];
     period = state.selectedMonth;
-    idx = allMonthPeriods.indexOf(period);
-    prevPeriod = idx>0 ? allMonthPeriods[idx-1] : null;
+    idx = periods.indexOf(period);
+    prevPeriod = idx>0 ? periods[idx-1] : null;
     cur = totalsForMonth(period);
     prev = totalsForMonth(prevPeriod);
     periodLabel = monthLabel(period);
     labelFormatter = monthLabelShort;
-    periods = allMonthPeriods.filter(function(p){ return p <= period; });
+    windowPeriods = periods.filter(function(p){ return p <= period; });
   } else {
+    periods = weeks;
     period = state.selectedWeek || weeks[weeks.length-1];
     idx = weeks.indexOf(period);
     prevPeriod = idx>0 ? weeks[idx-1] : null;
@@ -629,7 +630,7 @@ function renderOverview(){
     prev = totalsForWeek(prevPeriod);
     periodLabel = "Week of " + period;
     labelFormatter = function(w){ return String(w).slice(5); };
-    periods = weeks.filter(function(p){ return p <= period; });
+    windowPeriods = weeks.filter(function(p){ return p <= period; });
   }
 
   var deltaNoun = granularity==="month" ? "month" : "week";
@@ -678,7 +679,7 @@ function renderOverview(){
     });
   }
 
-  var lastPeriods = periods.slice(-12);
+  var lastPeriods = windowPeriods.slice(-12);
   var inboundAns = [], inboundUnans = [], outAns = [];
   lastPeriods.forEach(function(p){
     var t = granularity==="month" ? totalsForMonth(p) : totalsForWeek(p);
