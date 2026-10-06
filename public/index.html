@@ -937,4 +937,224 @@ function renderPccTable(){
 
   var html = '<div class="card"><h2>PCC performance — week of ' + week + '</h2>';
   html += '<div class="searchBox"><input type="text" id="pccFilter" placeholder="Filter by clinic or name…" /></div>';
-  html += '<table
+  html += '<table id="pccTableEl"><thead><tr><th>Clinic</th><th>Agent</th><th>Ext</th>' +
+    '<th>Inbound Ans.</th><th>Inbound Unans.</th><th>Outbounds Made</th><th>Talk Time</th></tr></thead><tbody>';
+  rows.forEach(function(r){
+    html += '<tr data-search="'+escapeHtml((r.clinic+" "+r.label).toLowerCase())+'">' +
+      '<td>'+escapeHtml(r.clinic)+'</td><td>'+escapeHtml(r.label)+'</td><td>'+r.ext+'</td>' +
+      '<td>'+r.d.inboundAnswered+'</td><td>'+r.d.inboundUnanswered+'</td>' +
+      '<td>'+r.d.outboundAnswered+'</td>' +
+      '<td>'+fmtHMS(r.d.talkTimeSec)+'</td></tr>';
+  });
+  html += '<tr class="totals"><td colspan="3">Totals</td>' +
+    '<td>'+totals.inboundAnswered+'</td><td>'+totals.inboundUnanswered+'</td>' +
+    '<td>'+totals.outboundAnswered+'</td>' +
+    '<td>'+fmtHMS(totals.talkTimeSec)+'</td></tr>';
+  html += '</tbody></table></div>';
+  root.innerHTML = html;
+
+  document.getElementById("pccFilter").addEventListener("input", function(e){
+    var q = e.target.value.toLowerCase();
+    document.querySelectorAll("#pccTableEl tbody tr[data-search]").forEach(function(tr){
+      tr.style.display = tr.getAttribute("data-search").indexOf(q)!==-1 ? "" : "none";
+    });
+  });
+}
+
+function renderQueues(){
+  var root = document.getElementById("tab-queues");
+  var weeks = allWeeks();
+  if(weeks.length===0){ root.innerHTML = '<div class="card"><div class="empty">No data yet.</div></div>'; return; }
+  var week = state.selectedWeek || weeks[weeks.length-1];
+
+  var codes = Object.keys(state.queueWeekly).filter(function(c){ return state.queueWeekly[c][week]; });
+  codes.sort(function(a,b){
+    var ca = weekQueueClinic(a) || a, cb = weekQueueClinic(b) || b;
+    return ca.localeCompare(cb);
+  });
+
+  if(codes.length===0){
+    root.innerHTML = '<div class="card"><div class="empty">No queue data for this week.</div></div>';
+    return;
+  }
+
+  var html = '<div class="card"><h2>Queue coverage — week of ' + week + '</h2>' +
+    '<div class="muted" style="margin-bottom:12px;">Rows marked <span class="buddyTag">covering</span> are an agent from a different clinic helping answer this queue.</div>';
+  codes.forEach(function(code){
+    var qd = state.queueWeekly[code][week];
+    var qInfo = state.queues[code] || {};
+    var qClinic = qInfo.clinic || "(unmapped queue "+code+")";
+    html += '<div class="queueBlock"><div class="queueHead"><span class="qname">'+escapeHtml(qClinic)+'</span>' +
+      '<span class="muted">Queue '+code+' · '+escapeHtml(qInfo.label||"")+'</span></div>';
+    html += '<table><thead><tr><th>Received</th><th>Serviced</th><th>Unanswered</th></tr></thead><tbody>' +
+      '<tr><td>'+qd.received+'</td><td>'+qd.serviced+'</td><td>'+qd.unanswered+'</td></tr></tbody></table>';
+    if(qd.agents && qd.agents.length){
+      html += '<table style="margin-top:6px;"><thead><tr><th>Agent</th><th>Ext</th><th>Clinic</th><th>Serviced</th><th>Talk Time</th></tr></thead><tbody>';
+      qd.agents.slice().sort(function(a,b){ return b.servicedCalls - a.servicedCalls; }).forEach(function(a){
+        var agentLine = state.lines[a.ext] || {};
+        var agentClinic = agentLine.clinic || "";
+        var isBuddy = agentClinic && qClinic && agentClinic !== qClinic && agentLine.category!=="ignore";
+        html += '<tr><td>'+escapeHtml(agentLine.label||"")+'</td><td>'+a.ext+'</td>' +
+          '<td>'+escapeHtml(agentClinic||"—")+(isBuddy?'<span class="buddyTag">covering</span>':'')+'</td>' +
+          '<td>'+a.servicedCalls+'</td><td>'+fmtHMS(a.talkTimeSec)+'</td></tr>';
+      });
+      html += '</tbody></table>';
+    }
+    html += '</div>';
+  });
+  html += '</div>';
+  root.innerHTML = html;
+}
+
+function renderUploadTab(){
+  var root = document.getElementById("tab-upload");
+  var html = '<div class="card"><h2>Upload a week</h2>';
+  if(!state.pendingParse){
+    html += '<div class="row">' +
+      '<div class="field"><label>Week ending</label><input type="date" id="weekEndingInput" /></div>' +
+      '<div class="field"><label>Extension Statistics export</label><input type="file" id="extStatsFile" accept=".csv,.xlsx,.xls" /></div>' +
+      '<div class="field"><label>Queue Performance export</label><input type="file" id="queuePerfFile" accept=".csv,.xlsx,.xls" /></div>' +
+      '<div class="field"><button class="btn" id="parseBtn">Parse files</button></div>' +
+      '</div><div class="muted" id="uploadStatus"></div>';
+  } else {
+    var pp = state.pendingParse;
+    html += '<p>Week ending <strong>'+pp.weekEnding+'</strong> — '+pp.extRows.length+' agent rows from '+
+      escapeHtml(pp.extFilename)+', '+Object.keys(pp.queues).length+' queues from '+escapeHtml(pp.queueFilename)+'.</p>';
+    if(pp.newCodes.length){
+      html += '<h3>New lines/queues — confirm clinic</h3><table class="reviewTable" id="newCodesTable"><thead>' +
+        '<tr><th>Type</th><th>Code</th><th>Seen as</th><th>Clinic</th><th>Category</th></tr></thead><tbody>';
+      pp.newCodes.forEach(function(nc){
+        html += '<tr data-type="'+nc.type+'" data-code="'+nc.code+'" data-label="'+escapeHtml(nc.label)+'">' +
+          '<td>'+(nc.type==="line"?"Line":"Queue")+'</td><td>'+nc.code+'</td><td>'+escapeHtml(nc.label)+'</td>' +
+          '<td><input type="text" data-field="clinic" value="'+escapeHtml(nc.guess)+'" placeholder="Clinic name" /></td>' +
+          '<td><select data-field="category">' +
+            (nc.type==="line" ?
+              '<option value="pcc" selected>PCC line</option><option value="ignore">Not a clinic (ignore)</option>' :
+              '<option value="queue" selected>Queue</option><option value="ignore">Not a clinic (ignore)</option>') +
+          '</select></td></tr>';
+      });
+      html += '</tbody></table>';
+    } else {
+      html += '<p class="muted">No new lines or queues this week — everything already mapped.</p>';
+    }
+    html += '<div class="row" style="margin-top:14px;"><button class="btn" id="commitBtn">Save this week</button>' +
+      '<button class="btn secondary" id="cancelBtn">Cancel</button></div>';
+  }
+  html += '</div>';
+
+  html += '<div class="card"><h2>Upload history</h2>';
+  if(state.uploads.length===0){
+    html += '<div class="empty">No uploads yet.</div>';
+  } else {
+    html += '<table><thead><tr><th>Week</th><th>Extension file</th><th>Queue file</th><th>Agent rows</th><th>Queues</th><th>Uploaded</th></tr></thead><tbody>';
+    state.uploads.slice(0,25).forEach(function(u){
+      html += '<tr><td>'+escapeHtml(u.weekEnding)+'</td><td>'+escapeHtml(u.extFilename)+'</td><td>'+escapeHtml(u.queueFilename)+
+        '</td><td>'+(u.extRows||0)+'</td><td>'+(u.queueCount||0)+'</td><td>'+new Date(u.uploadedAt).toLocaleString()+'</td></tr>';
+    });
+    html += '</tbody></table>';
+  }
+  html += '</div>';
+
+  root.innerHTML = html;
+
+  if(!state.pendingParse){
+    document.getElementById("parseBtn").addEventListener("click", handleParseClick);
+  } else {
+    document.getElementById("commitBtn").addEventListener("click", commitUpload);
+    document.getElementById("cancelBtn").addEventListener("click", cancelPending);
+  }
+}
+
+function renderMapping(){
+  var root = document.getElementById("tab-mapping");
+  var lineCodes = Object.keys(state.lines).sort();
+  var queueCodes = Object.keys(state.queues).sort();
+
+  var html = '<div class="card"><h2>PCC / agent lines</h2>';
+  if(lineCodes.length===0){ html += '<div class="empty">No lines yet — upload a week first.</div>'; }
+  else {
+    html += '<table id="lineMapTable"><thead><tr><th>Ext</th><th>Seen as</th><th>Clinic</th><th>Category</th><th></th></tr></thead><tbody>';
+    lineCodes.forEach(function(ext){
+      var l = state.lines[ext];
+      html += '<tr data-code="'+ext+'"><td>'+ext+'</td><td>'+escapeHtml(l.label||"")+'</td>' +
+        '<td><input type="text" data-field="clinic" value="'+escapeHtml(l.clinic||"")+'" /></td>' +
+        '<td><select data-field="category">' +
+          '<option value="pcc"'+(l.category==="pcc"?' selected':'')+'>PCC line</option>' +
+          '<option value="ignore"'+(l.category==="ignore"?' selected':'')+'>Not a clinic (ignore)</option>' +
+        '</select></td>' +
+        '<td><button class="btn sm secondary" data-action="save">Save</button></td></tr>';
+    });
+    html += '</tbody></table>';
+  }
+  html += '</div>';
+
+  html += '<div class="card"><h2>Queues</h2>';
+  if(queueCodes.length===0){ html += '<div class="empty">No queues yet — upload a week first.</div>'; }
+  else {
+    html += '<table id="queueMapTable"><thead><tr><th>Code</th><th>Seen as</th><th>Clinic</th><th>Category</th><th></th></tr></thead><tbody>';
+    queueCodes.forEach(function(code){
+      var q = state.queues[code];
+      html += '<tr data-code="'+code+'"><td>'+code+'</td><td>'+escapeHtml(q.label||"")+'</td>' +
+        '<td><input type="text" data-field="clinic" value="'+escapeHtml(q.clinic||"")+'" /></td>' +
+        '<td><select data-field="category">' +
+          '<option value="queue"'+(q.category==="queue"?' selected':'')+'>Queue</option>' +
+          '<option value="ignore"'+(q.category==="ignore"?' selected':'')+'>Not a clinic (ignore)</option>' +
+        '</select></td>' +
+        '<td><button class="btn sm secondary" data-action="save">Save</button></td></tr>';
+    });
+    html += '</tbody></table>';
+  }
+  html += '</div>';
+
+  root.innerHTML = html;
+
+  root.querySelectorAll('#lineMapTable tbody tr').forEach(function(tr){
+    tr.querySelector('[data-action=save]').addEventListener("click", async function(){
+      var ext = tr.getAttribute("data-code");
+      var clinic = tr.querySelector('input[data-field=clinic]').value.trim();
+      var category = tr.querySelector('select[data-field=category]').value;
+      var existing = state.lines[ext];
+      await persistLine(ext, {category:category, clinic:clinic, label:existing.label, updatedAt:new Date().toISOString()});
+      showToast("Saved ext " + ext);
+    });
+  });
+  root.querySelectorAll('#queueMapTable tbody tr').forEach(function(tr){
+    tr.querySelector('[data-action=save]').addEventListener("click", async function(){
+      var code = tr.getAttribute("data-code");
+      var clinic = tr.querySelector('input[data-field=clinic]').value.trim();
+      var category = tr.querySelector('select[data-field=category]').value;
+      var existing = state.queues[code];
+      await persistQueue(code, {category:category, clinic:clinic, label:existing.label, updatedAt:new Date().toISOString()});
+      showToast("Saved queue " + code);
+    });
+  });
+}
+
+function renderAll(){
+  renderWeekSelector();
+  renderOverview();
+  renderPccTable();
+  renderQueues();
+  renderTrends();
+  renderUploadTab();
+  renderMapping();
+}
+
+/* ===================================================================
+ * 7. NAV
+ * =================================================================== */
+document.getElementById("nav").addEventListener("click", function(e){
+  var btn = e.target.closest("button[data-tab]");
+  if(!btn) return;
+  document.querySelectorAll("#nav button").forEach(function(b){ b.classList.remove("active"); });
+  btn.classList.add("active");
+  ["overview","table","queues","trends","upload","mapping"].forEach(function(t){
+    document.getElementById("tab-"+t).style.display = (t===btn.getAttribute("data-tab")) ? "" : "none";
+  });
+  state.activeTab = btn.getAttribute("data-tab");
+});
+
+initDb();
+</script>
+</body>
+</html>
