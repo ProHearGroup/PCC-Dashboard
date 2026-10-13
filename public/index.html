@@ -1235,6 +1235,27 @@ function renderUploadTab(){
   }
   html += '</div>';
 
+  // Manual single-extension entry — for a PCC line that got left out of a week's
+  // Extension Statistics export (or needs a correction), without re-uploading the whole pair.
+  html += '<div class="card"><h2>Add or correct one extension — single week</h2>' +
+    '<div class="muted" style="margin-bottom:10px;">Use this when a PCC line was left out of a week\'s Extension Statistics export, or a number needs fixing. Saves just that one extension for that one week — everything else stays as uploaded.</div>' +
+    '<div class="row">' +
+      '<div class="field"><label>Week ending</label><input type="date" id="manualWeekInput" /></div>' +
+      '<div class="field"><label>Extension</label><input type="text" id="manualExtInput" placeholder="e.g. 212" /></div>' +
+      '<div class="field"><label>Agent / PCC name</label><input type="text" id="manualLabelInput" placeholder="Seen-as name" /></div>' +
+      '<div class="field"><label>Clinic</label><input type="text" id="manualClinicInput" placeholder="Clinic name" /></div>' +
+    '</div>' +
+    '<div class="row">' +
+      '<div class="field"><label>Inbound Answered</label><input type="text" id="manualInboundAns" value="0" /></div>' +
+      '<div class="field"><label>Inbound Unanswered</label><input type="text" id="manualInboundUnans" value="0" /></div>' +
+      '<div class="field"><label>Outbound Answered</label><input type="text" id="manualOutboundAns" value="0" /></div>' +
+      '<div class="field"><label>Outbound Unanswered</label><input type="text" id="manualOutboundUnans" value="0" /></div>' +
+      '<div class="field"><label>Talk Time (H:MM:SS)</label><input type="text" id="manualTalkTime" value="0:00:00" /></div>' +
+    '</div>' +
+    '<div class="row" style="margin-top:4px;"><button class="btn" id="manualSaveBtn" type="button">Save this extension\'s week</button></div>' +
+    '<div class="muted" id="manualEntryStatus" style="margin-top:8px;"></div>' +
+    '</div>';
+
   html += '<div class="card"><h2>Upload history</h2>';
   if(state.uploads.length===0){
     html += '<div class="empty">No uploads yet.</div>';
@@ -1256,6 +1277,50 @@ function renderUploadTab(){
     document.getElementById("commitBtn").addEventListener("click", commitUpload);
     document.getElementById("cancelBtn").addEventListener("click", cancelPending);
   }
+
+  // Prefill name/clinic when the extension is already known.
+  document.getElementById("manualExtInput").addEventListener("change", function(){
+    var ext = this.value.trim();
+    var existing = state.lines[ext];
+    if(existing){
+      document.getElementById("manualLabelInput").value = existing.label || "";
+      document.getElementById("manualClinicInput").value = existing.clinic || "";
+    }
+  });
+  document.getElementById("manualSaveBtn").addEventListener("click", handleManualEntrySave);
+}
+
+async function handleManualEntrySave(){
+  var statusEl = document.getElementById("manualEntryStatus");
+  var week = document.getElementById("manualWeekInput").value;
+  var ext = document.getElementById("manualExtInput").value.trim();
+  var label = document.getElementById("manualLabelInput").value.trim();
+  var clinic = document.getElementById("manualClinicInput").value.trim();
+  if(!week){ statusEl.textContent = "Pick the week-ending date first."; return; }
+  if(!ext){ statusEl.textContent = "Enter the extension number first."; return; }
+
+  var existing = state.lines[ext];
+  var inboundAnswered = Number(document.getElementById("manualInboundAns").value) || 0;
+  var inboundUnanswered = Number(document.getElementById("manualInboundUnans").value) || 0;
+  var outboundAnswered = Number(document.getElementById("manualOutboundAns").value) || 0;
+  var outboundUnanswered = Number(document.getElementById("manualOutboundUnans").value) || 0;
+  var talkTimeSec = parseTalkTime(document.getElementById("manualTalkTime").value);
+
+  statusEl.textContent = "Saving…";
+  await persistLine(ext, {
+    category: "pcc",
+    clinic: clinic || (existing ? existing.clinic : "") || guessClinic(ext, label),
+    label: label || (existing ? existing.label : "") || ("Ext " + ext),
+    updatedAt: new Date().toISOString()
+  });
+  await persistWeekly(ext, week, {
+    inboundAnswered: inboundAnswered, inboundUnanswered: inboundUnanswered,
+    outboundAnswered: outboundAnswered, outboundUnanswered: outboundUnanswered,
+    talkTimeSec: talkTimeSec
+  });
+
+  showToast("Saved ext " + ext + " for week of " + week);
+  renderAll();
 }
 
 function renderMapping(){
