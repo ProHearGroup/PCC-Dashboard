@@ -158,6 +158,7 @@ var state = {
   selectedMonth: null,
   trendsQueue: null,
   trendsGranularity: "week",     // 'week' | 'month'
+  coverageFilter: "all",          // 'all' | 'covering'
   activeTab: "overview"
 };
 
@@ -492,13 +493,14 @@ function escapeHtml(s){
     return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];
   });
 }
-function pctDelta(cur, prev){
+function pctDelta(cur, prev, noun){
+  noun = noun || "week";
   if(prev===0 && cur===0) return {text:"—", cls:"flat"};
   if(prev===0) return {text:"new", cls:"up"};
   var d = ((cur-prev)/prev)*100;
   var cls = d>0.5 ? "up" : (d<-0.5 ? "down" : "flat");
   var sign = d>0 ? "+" : "";
-  return {text: sign + d.toFixed(0) + "% vs prior week", cls:cls};
+  return {text: sign + d.toFixed(0) + "% vs prior " + noun, cls:cls};
 }
 
 function weekLineClinic(ext){
@@ -553,6 +555,41 @@ function queueTotalsForMonth(code, mk){
   });
   return out;
 }
+function clinicOutboundForWeek(clinic, week){
+  if(!clinic || !week) return 0;
+  var total = 0;
+  Object.keys(state.lines).forEach(function(ext){
+    var l = state.lines[ext];
+    if(!l || l.clinic !== clinic || l.category==="ignore") return;
+    var d = (state.weekly[ext]||{})[week];
+    if(d) total += d.outboundAnswered||0;
+  });
+  return total;
+}
+function clinicOutboundForMonth(clinic, mk){
+  if(!clinic || !mk) return 0;
+  var total = 0;
+  weeksInMonth(mk).forEach(function(w){ total += clinicOutboundForWeek(clinic, w); });
+  return total;
+}
+function queueAgentServicedForWeek(code, week){
+  var out = {};
+  var d = (state.queueWeekly[code]||{})[week];
+  if(!d || !d.agents) return out;
+  d.agents.forEach(function(a){ out[a.ext] = (out[a.ext]||0) + (a.servicedCalls||0); });
+  return out;
+}
+function clinicAgentOutboundForWeek(clinic, week){
+  var out = {};
+  if(!clinic || !week) return out;
+  Object.keys(state.lines).forEach(function(ext){
+    var l = state.lines[ext];
+    if(!l || l.clinic !== clinic || l.category==="ignore") return;
+    var d = (state.weekly[ext]||{})[week];
+    if(d && d.outboundAnswered) out[ext] = (out[ext]||0) + d.outboundAnswered;
+  });
+  return out;
+}
 function renderLegend(seriesDefs){
   return '<div style="display:flex; gap:14px; flex-wrap:wrap; margin-bottom:8px; font-size:12px; color:var(--muted);">' +
     seriesDefs.map(function(d){
@@ -589,7 +626,7 @@ function renderOverview(){
   }
 
   var granularity = state.overviewGranularity || "week";
-  var periods, period, idx, prevPeriod, cur, prev, periodLabel, labelFormatter;
+  var periods, windowPeriods, period, idx, prevPeriod, cur, prev, periodLabel, labelFormatter;
 
   if(granularity === "month"){
     periods = allMonths();
@@ -601,19 +638,22 @@ function renderOverview(){
     prev = totalsForMonth(prevPeriod);
     periodLabel = monthLabel(period);
     labelFormatter = monthLabelShort;
+    windowPeriods = periods.filter(function(p){ return p <= period; });
   } else {
     periods = weeks;
-    period = state.selectedWeek || periods[periods.length-1];
-    idx = periods.indexOf(period);
-    prevPeriod = idx>0 ? periods[idx-1] : null;
+    period = state.selectedWeek || weeks[weeks.length-1];
+    idx = weeks.indexOf(period);
+    prevPeriod = idx>0 ? weeks[idx-1] : null;
     cur = totalsForWeek(period);
     prev = totalsForWeek(prevPeriod);
     periodLabel = "Week of " + period;
     labelFormatter = function(w){ return String(w).slice(5); };
+    windowPeriods = weeks.filter(function(p){ return p <= period; });
   }
 
+  var deltaNoun = granularity==="month" ? "month" : "week";
   function tile(label, value, deltaCur, deltaPrev){
-    var d = pctDelta(deltaCur, deltaPrev);
+    var d = pctDelta(deltaCur, deltaPrev, deltaNoun);
     return '<div class="kpi"><div class="label">'+label+'</div><div class="value">'+value+'</div>'+
       (prevPeriod ? '<div class="delta '+d.cls+'">'+d.text+'</div>' : '') + '</div>';
   }
@@ -636,14 +676,14 @@ function renderOverview(){
   html += '<div class="kpis">' +
     tile("Inbound Answered", cur.inboundAnswered, cur.inboundAnswered, prev.inboundAnswered) +
     tile("Inbound Unanswered", cur.inboundUnanswered, cur.inboundUnanswered, prev.inboundUnanswered) +
-    tile("Outbound Answered", cur.outboundAnswered, cur.outboundAnswered, prev.outboundAnswered) +
-    tile("Outbound Unanswered", cur.outboundUnanswered, cur.outboundUnanswered, prev.outboundUnanswered) +
+    tile("Outbound Calls Made", cur.outboundAnswered, cur.outboundAnswered, prev.outboundAnswered) +
     '<div class="kpi"><div class="label">Answer Rate</div><div class="value">'+answerRate+'%</div></div>' +
     '</div>';
 
   var periodNoun = granularity==="month" ? "months" : "weeks";
-  html += '<div class="card"><h2>Inbound calls — last '+periodNoun+'</h2><div id="chartInboundWrap"></div></div>';
-  html += '<div class="card"><h2>Outbound calls — last '+periodNoun+'</h2><div id="chartOutboundWrap"></div></div>';
+  var windowNote = '<div class="muted" style="margin-bottom:10px;">Showing the 12 '+periodNoun+' through '+periodLabel+'.</div>';
+  html += '<div class="card"><h2>Inbound calls — last '+periodNoun+'</h2>'+windowNote+'<div id="chartInboundWrap"></div></div>';
+  html += '<div class="card"><h2>Outbound calls — last '+periodNoun+'</h2>'+windowNote+'<div id="chartOutboundWrap"></div></div>';
   root.innerHTML = html;
 
   document.getElementById("overviewGranularity").addEventListener("change", function(e){
@@ -657,19 +697,19 @@ function renderOverview(){
     });
   }
 
-  var lastPeriods = periods.slice(-12);
-  var inboundAns = [], inboundUnans = [], outAns = [], outUnans = [];
+  var lastPeriods = windowPeriods.slice(-12);
+  var inboundAns = [], inboundUnans = [], outAns = [];
   lastPeriods.forEach(function(p){
     var t = granularity==="month" ? totalsForMonth(p) : totalsForWeek(p);
     inboundAns.push(t.inboundAnswered); inboundUnans.push(t.inboundUnanswered);
-    outAns.push(t.outboundAnswered); outUnans.push(t.outboundUnanswered);
+    outAns.push(t.outboundAnswered);
   });
   drawChart(document.getElementById("chartInboundWrap"), lastPeriods,
     [{key:"ans", color:"var(--good)", name:"Answered"}, {key:"unans", color:"var(--bad)", name:"Unanswered"}],
-    {ans:inboundAns, unans:inboundUnans}, {type:"bar", labelFormatter:labelFormatter});
+    {ans:inboundAns, unans:inboundUnans}, {type:"bar", labelFormatter:labelFormatter, showValues:true});
   drawChart(document.getElementById("chartOutboundWrap"), lastPeriods,
-    [{key:"ans", color:"var(--accent)", name:"Answered"}, {key:"unans", color:"var(--warn)", name:"Unanswered"}],
-    {ans:outAns, unans:outUnans}, {type:"bar", labelFormatter:labelFormatter});
+    [{key:"ans", color:"var(--accent)", name:"Outbound Calls Made"}],
+    {ans:outAns}, {type:"bar", labelFormatter:labelFormatter, showValues:true});
 }
 
 function renderTrends(){
@@ -690,8 +730,46 @@ function renderTrends(){
   if(!state.trendsQueue || queueCodes.indexOf(state.trendsQueue)===-1) state.trendsQueue = queueCodes[0];
   var granularity = state.trendsGranularity || "week";
   var code = state.trendsQueue;
+  var qInfo = state.queues[code] || {};
+  var qClinic = qInfo.clinic || "";
 
-  var html = '<div class="card"><h2>Queue performance over time</h2>';
+  var allW = allWeeks();
+  var anchorWeek = state.selectedWeek && allW.indexOf(state.selectedWeek)!==-1 ? state.selectedWeek : allW[allW.length-1];
+  var anchorMonth = monthKey(anchorWeek);
+
+  // Who answered / who called out this queue's clinic, for the selected "Week of" week —
+  // shown as a small panel in the corner regardless of the Week/Month trend view below.
+  var weekAnswered = queueAgentServicedForWeek(code, anchorWeek);
+  var weekOutbound = qClinic ? clinicAgentOutboundForWeek(qClinic, anchorWeek) : {};
+  var agentPanelExts = {};
+  Object.keys(weekAnswered).forEach(function(ext){ agentPanelExts[ext] = true; });
+  Object.keys(weekOutbound).forEach(function(ext){ agentPanelExts[ext] = true; });
+  var agentPanelRows = Object.keys(agentPanelExts).map(function(ext){
+    var line = state.lines[ext] || {};
+    var answered = weekAnswered[ext] || 0;
+    var outboundMade = weekOutbound[ext] || 0;
+    var covering = line.clinic && qClinic && line.clinic !== qClinic;
+    return {ext:ext, label:line.label || ("Ext "+ext), answered:answered, outboundMade:outboundMade, covering:covering};
+  }).sort(function(a,b){ return (b.answered-a.answered) || (b.outboundMade-a.outboundMade); });
+
+  var agentPanelHtml = '<div style="margin-left:auto; min-width:210px; max-width:280px;">' +
+    '<div class="muted" style="font-size:11px; text-transform:uppercase; letter-spacing:.03em; margin-bottom:4px;">Agents — week of '+anchorWeek+'</div>';
+  if(agentPanelRows.length===0){
+    agentPanelHtml += '<div class="empty" style="padding:4px 0;">No agent activity this week.</div>';
+  } else {
+    agentPanelHtml += '<table style="font-size:12px;"><thead><tr><th>Agent</th><th>Answered</th><th>Outbound</th></tr></thead><tbody>';
+    agentPanelRows.forEach(function(r){
+      agentPanelHtml += '<tr><td>'+escapeHtml(r.label)+(r.covering?'<span class="buddyTag">covering</span>':'')+'</td>' +
+        '<td>'+r.answered+'</td><td>'+r.outboundMade+'</td></tr>';
+    });
+    agentPanelHtml += '</tbody></table>';
+  }
+  agentPanelHtml += '</div>';
+
+  var html = '<div class="card"><h2>Queue performance over time</h2>' +
+    '<div class="muted" style="margin-bottom:10px;">Showing the 12 '+(granularity==="month"?"months":"weeks")+' through '+
+    (granularity==="month" ? monthLabel(anchorMonth) : ("week of "+anchorWeek)) +
+    ' — use the "Week of" selector at the top right to move this window.</div>';
   html += '<div class="row" style="margin-bottom:14px; align-items:flex-end;">';
   html += '<div class="field" style="margin-bottom:0;"><label>Queue</label><select id="trendsQueueSelect">' +
     queueCodes.map(function(c){
@@ -703,13 +781,21 @@ function renderTrends(){
     '<option value="week"'+(granularity==="week"?' selected':'')+'>Week</option>' +
     '<option value="month"'+(granularity==="month"?' selected':'')+'>Month</option>' +
     '</select></div>';
+  html += agentPanelHtml;
   html += '</div>';
+  if(!qClinic){
+    html += '<div class="muted" style="margin-bottom:10px;">This queue isn\'t mapped to a clinic yet, so outbound calls made can\'t be matched to it — map it under Line Mapping to see that line.</div>';
+  }
+  var periodNounTrends = granularity==="month" ? "months" : "weeks";
+  html += '<h3 style="margin-top:4px;">Queue calls — last '+periodNounTrends+'</h3>';
   html += renderLegend([
     {color:"var(--accent)", name:"Received"},
     {color:"var(--good)", name:"Serviced"},
     {color:"var(--bad)", name:"Unanswered"}
   ]);
-  html += '<div id="trendsChartWrap"></div>';
+  html += '<div id="trendsQueueChartWrap"></div>';
+  html += '<h3 style="margin-top:18px;">Outbound calls made — last '+periodNounTrends+'</h3>';
+  html += '<div id="trendsOutboundChartWrap"></div>';
   html += '<div id="trendsTableWrap" style="margin-top:14px;"></div>';
   html += '</div>';
   root.innerHTML = html;
@@ -723,28 +809,40 @@ function renderTrends(){
     renderTrends();
   });
 
-  var periods = granularity==="month" ? allMonths() : allWeeks();
+  var periods = granularity==="month" ?
+    allMonths().filter(function(mk){ return mk <= anchorMonth; }) :
+    allW.filter(function(w){ return w <= anchorWeek; });
   var labelFormatter = granularity==="month" ? monthLabelShort : function(w){ return String(w).slice(5); };
-  var received = [], serviced = [], unanswered = [];
+  var received = [], serviced = [], unanswered = [], outbound = [];
   periods.forEach(function(p){
     var t = granularity==="month" ? queueTotalsForMonth(code, p) : queueTotalsForWeek(code, p);
     received.push(t.received); serviced.push(t.serviced); unanswered.push(t.unanswered);
+    outbound.push(granularity==="month" ? clinicOutboundForMonth(qClinic, p) : clinicOutboundForWeek(qClinic, p));
   });
 
-  drawChart(document.getElementById("trendsChartWrap"), periods,
+  var lastPeriodsTrends = periods.slice(-12);
+  var lastReceived = received.slice(-12), lastServiced = serviced.slice(-12),
+    lastUnanswered = unanswered.slice(-12), lastOutbound = outbound.slice(-12);
+
+  drawChart(document.getElementById("trendsQueueChartWrap"), lastPeriodsTrends,
     [{key:"received", color:"var(--accent)", name:"Received"},
      {key:"serviced", color:"var(--good)", name:"Serviced"},
      {key:"unanswered", color:"var(--bad)", name:"Unanswered"}],
-    {received:received, serviced:serviced, unanswered:unanswered},
-    {type:"line", labelFormatter:labelFormatter});
+    {received:lastReceived, serviced:lastServiced, unanswered:lastUnanswered},
+    {type:"bar", labelFormatter:labelFormatter, showValues:true});
+
+  drawChart(document.getElementById("trendsOutboundChartWrap"), lastPeriodsTrends,
+    [{key:"outbound", color:"var(--warn)", name:"Outbound Calls Made"}],
+    {outbound:lastOutbound},
+    {type:"bar", labelFormatter:labelFormatter, showValues:true});
 
   var tableHtml = '<table><thead><tr><th>'+(granularity==="month"?"Month":"Week")+
-    '</th><th>Received</th><th>Serviced</th><th>Unanswered</th><th>Answer Rate</th></tr></thead><tbody>';
+    '</th><th>Received</th><th>Serviced</th><th>Unanswered</th><th>Answer Rate</th><th>Outbound Calls Made</th></tr></thead><tbody>';
   for(var i=periods.length-1; i>=0; i--){
-    var r = received[i], s = serviced[i], u = unanswered[i];
+    var r = received[i], s = serviced[i], u = unanswered[i], ob = outbound[i];
     var rate = r>0 ? Math.round(100*s/r)+"%" : "—";
     var lbl = granularity==="month" ? monthLabel(periods[i]) : ("Week of "+periods[i]);
-    tableHtml += '<tr><td>'+lbl+'</td><td>'+r+'</td><td>'+s+'</td><td>'+u+'</td><td>'+rate+'</td></tr>';
+    tableHtml += '<tr><td>'+lbl+'</td><td>'+r+'</td><td>'+s+'</td><td>'+u+'</td><td>'+rate+'</td><td>'+ob+'</td></tr>';
   }
   tableHtml += '</tbody></table>';
   document.getElementById("trendsTableWrap").innerHTML = tableHtml;
@@ -756,7 +854,7 @@ function drawChart(container, labels, seriesDefs, series, opts){
   var labelFormatter = opts.labelFormatter || function(l){ return String(l).slice(5); };
   container.innerHTML = "";
   var W = Math.max(container.clientWidth || 540, 320), H = 190;
-  var pad = {l:34, r:14, t:14, b:28};
+  var pad = {l:34, r:14, t:(opts.showValues ? 24 : 14), b:28};
   var svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
   svg.setAttribute("class", "chart");
   svg.setAttribute("width", "100%"); svg.setAttribute("height", H);
@@ -798,15 +896,17 @@ function drawChart(container, labels, seriesDefs, series, opts){
 
   if(type === "bar"){
     var groupW = plotW / labels.length;
-    var barW = Math.min(16, (groupW - 10) / seriesDefs.length);
+    var barW = Math.min(seriesDefs.length===1 ? 28 : 16, (groupW - 10) / seriesDefs.length);
     labels.forEach(function(wk, i){
       var gx = pad.l + i*groupW + (groupW - barW*seriesDefs.length)/2;
       seriesDefs.forEach(function(def, si){
         var val = series[def.key][i]||0;
         var bh = plotH * (val/maxVal);
+        var barX = gx + si*barW;
+        var barTopY = pad.t + plotH - bh;
         var rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
-        rect.setAttribute("x", gx + si*barW);
-        rect.setAttribute("y", pad.t + plotH - bh);
+        rect.setAttribute("x", barX);
+        rect.setAttribute("y", barTopY);
         rect.setAttribute("width", Math.max(1,barW-2));
         rect.setAttribute("height", Math.max(0,bh));
         rect.setAttribute("fill", def.color);
@@ -815,6 +915,17 @@ function drawChart(container, labels, seriesDefs, series, opts){
         title.textContent = def.name + " — " + labelFormatter(wk) + ": " + val;
         rect.appendChild(title);
         svg.appendChild(rect);
+        if(opts.showValues){
+          var vlbl = document.createElementNS("http://www.w3.org/2000/svg", "text");
+          vlbl.setAttribute("x", barX + Math.max(1,barW-2)/2);
+          vlbl.setAttribute("y", Math.max(10, barTopY - 4));
+          vlbl.setAttribute("text-anchor","middle");
+          vlbl.setAttribute("font-size","10.5");
+          vlbl.setAttribute("font-weight","600");
+          vlbl.setAttribute("fill", def.color);
+          vlbl.textContent = val;
+          svg.appendChild(vlbl);
+        }
       });
       var lbl = document.createElementNS("http://www.w3.org/2000/svg", "text");
       lbl.setAttribute("x", gx + (groupW-10)/2);
@@ -930,32 +1041,64 @@ function renderQueues(){
     return;
   }
 
+  var coverageFilter = state.coverageFilter || "all";
+
   var html = '<div class="card"><h2>Queue coverage — week of ' + week + '</h2>' +
+    '<div class="row" style="margin-bottom:10px; align-items:flex-end;">' +
+    '<div class="field" style="margin-bottom:0;"><label>Show</label><select id="coverageFilterSelect">' +
+      '<option value="all"'+(coverageFilter==="all"?' selected':'')+'>All agents</option>' +
+      '<option value="covering"'+(coverageFilter==="covering"?' selected':'')+'>Covering only</option>' +
+    '</select></div>' +
+    '</div>' +
     '<div class="muted" style="margin-bottom:12px;">Rows marked <span class="buddyTag">covering</span> are an agent from a different clinic helping answer this queue.</div>';
+
+  var anyQueueShown = false;
   codes.forEach(function(code){
     var qd = state.queueWeekly[code][week];
     var qInfo = state.queues[code] || {};
     var qClinic = qInfo.clinic || "(unmapped queue "+code+")";
+
+    var agentsSorted = (qd.agents||[]).slice().sort(function(a,b){ return b.servicedCalls - a.servicedCalls; });
+    var agentsWithFlag = agentsSorted.map(function(a){
+      var agentLine = state.lines[a.ext] || {};
+      var agentClinic = agentLine.clinic || "";
+      var isBuddy = agentClinic && qClinic && agentClinic !== qClinic && agentLine.category!=="ignore";
+      return {a:a, agentLine:agentLine, agentClinic:agentClinic, isBuddy:isBuddy};
+    });
+    var visibleAgents = coverageFilter==="covering" ?
+      agentsWithFlag.filter(function(x){ return x.isBuddy; }) : agentsWithFlag;
+
+    if(coverageFilter==="covering" && visibleAgents.length===0) return; // hide queues with no coverage
+    anyQueueShown = true;
+
     html += '<div class="queueBlock"><div class="queueHead"><span class="qname">'+escapeHtml(qClinic)+'</span>' +
       '<span class="muted">Queue '+code+' · '+escapeHtml(qInfo.label||"")+'</span></div>';
     html += '<table><thead><tr><th>Received</th><th>Serviced</th><th>Unanswered</th></tr></thead><tbody>' +
       '<tr><td>'+qd.received+'</td><td>'+qd.serviced+'</td><td>'+qd.unanswered+'</td></tr></tbody></table>';
-    if(qd.agents && qd.agents.length){
+    if(visibleAgents.length){
       html += '<table style="margin-top:6px;"><thead><tr><th>Agent</th><th>Ext</th><th>Clinic</th><th>Serviced</th><th>Talk Time</th></tr></thead><tbody>';
-      qd.agents.slice().sort(function(a,b){ return b.servicedCalls - a.servicedCalls; }).forEach(function(a){
-        var agentLine = state.lines[a.ext] || {};
-        var agentClinic = agentLine.clinic || "";
-        var isBuddy = agentClinic && qClinic && agentClinic !== qClinic && agentLine.category!=="ignore";
-        html += '<tr><td>'+escapeHtml(agentLine.label||"")+'</td><td>'+a.ext+'</td>' +
-          '<td>'+escapeHtml(agentClinic||"—")+(isBuddy?'<span class="buddyTag">covering</span>':'')+'</td>' +
-          '<td>'+a.servicedCalls+'</td><td>'+fmtHMS(a.talkTimeSec)+'</td></tr>';
+      visibleAgents.forEach(function(x){
+        html += '<tr><td>'+escapeHtml(x.agentLine.label||"")+'</td><td>'+x.a.ext+'</td>' +
+          '<td>'+escapeHtml(x.agentClinic||"—")+(x.isBuddy?'<span class="buddyTag">covering</span>':'')+'</td>' +
+          '<td>'+x.a.servicedCalls+'</td><td>'+fmtHMS(x.a.talkTimeSec)+'</td></tr>';
       });
       html += '</tbody></table>';
+    } else if(coverageFilter!=="covering"){
+      html += '<div class="empty">No agent detail for this queue.</div>';
     }
     html += '</div>';
   });
+
+  if(!anyQueueShown){
+    html += '<div class="empty">No queues had cross-clinic coverage this week.</div>';
+  }
   html += '</div>';
   root.innerHTML = html;
+
+  document.getElementById("coverageFilterSelect").addEventListener("change", function(e){
+    state.coverageFilter = e.target.value;
+    renderQueues();
+  });
 }
 
 function renderUploadTab(){
