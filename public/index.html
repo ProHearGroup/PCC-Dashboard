@@ -159,6 +159,7 @@ var state = {
   trendsQueue: null,
   trendsGranularity: "week",     // 'week' | 'month'
   coverageFilter: "all",          // 'all' | 'covering'
+  tableWeeks: null,               // array of week-ending strings selected in the PCC Table tab (null = use current week)
   activeTab: "overview"
 };
 
@@ -572,6 +573,37 @@ function clinicOutboundForMonth(clinic, mk){
   weeksInMonth(mk).forEach(function(w){ total += clinicOutboundForWeek(clinic, w); });
   return total;
 }
+function queueAgentServicedForWeek(code, week){
+  var out = {};
+  var d = (state.queueWeekly[code]||{})[week];
+  if(!d || !d.agents) return out;
+  d.agents.forEach(function(a){ out[a.ext] = (out[a.ext]||0) + (a.servicedCalls||0); });
+  return out;
+}
+function clinicAgentOutboundForWeek(clinic, week){
+  var out = {};
+  if(!clinic || !week) return out;
+  Object.keys(state.lines).forEach(function(ext){
+    var l = state.lines[ext];
+    if(!l || l.clinic !== clinic || l.category==="ignore") return;
+    var d = (state.weekly[ext]||{})[week];
+    if(d && d.outboundAnswered) out[ext] = (out[ext]||0) + d.outboundAnswered;
+  });
+  return out;
+}
+function sumWeeklyForWeeks(ext, weeksArr){
+  var out = {inboundAnswered:0, inboundUnanswered:0, outboundAnswered:0, outboundUnanswered:0, talkTimeSec:0};
+  var any = false;
+  (weeksArr||[]).forEach(function(w){
+    var d = (state.weekly[ext]||{})[w];
+    if(!d) return;
+    any = true;
+    out.inboundAnswered += d.inboundAnswered||0; out.inboundUnanswered += d.inboundUnanswered||0;
+    out.outboundAnswered += d.outboundAnswered||0; out.outboundUnanswered += d.outboundUnanswered||0;
+    out.talkTimeSec += d.talkTimeSec||0;
+  });
+  return any ? out : null;
+}
 function renderLegend(seriesDefs){
   return '<div style="display:flex; gap:14px; flex-wrap:wrap; margin-bottom:8px; font-size:12px; color:var(--muted);">' +
     seriesDefs.map(function(d){
@@ -719,6 +751,35 @@ function renderTrends(){
   var anchorWeek = state.selectedWeek && allW.indexOf(state.selectedWeek)!==-1 ? state.selectedWeek : allW[allW.length-1];
   var anchorMonth = monthKey(anchorWeek);
 
+  // Who answered / who called out this queue's clinic, for the selected "Week of" week —
+  // shown as a small panel in the corner regardless of the Week/Month trend view below.
+  var weekAnswered = queueAgentServicedForWeek(code, anchorWeek);
+  var weekOutbound = qClinic ? clinicAgentOutboundForWeek(qClinic, anchorWeek) : {};
+  var agentPanelExts = {};
+  Object.keys(weekAnswered).forEach(function(ext){ agentPanelExts[ext] = true; });
+  Object.keys(weekOutbound).forEach(function(ext){ agentPanelExts[ext] = true; });
+  var agentPanelRows = Object.keys(agentPanelExts).map(function(ext){
+    var line = state.lines[ext] || {};
+    var answered = weekAnswered[ext] || 0;
+    var outboundMade = weekOutbound[ext] || 0;
+    var covering = line.clinic && qClinic && line.clinic !== qClinic;
+    return {ext:ext, label:line.label || ("Ext "+ext), answered:answered, outboundMade:outboundMade, covering:covering};
+  }).sort(function(a,b){ return (b.answered-a.answered) || (b.outboundMade-a.outboundMade); });
+
+  var agentPanelHtml = '<div style="margin-left:auto; min-width:210px; max-width:280px;">' +
+    '<div class="muted" style="font-size:11px; text-transform:uppercase; letter-spacing:.03em; margin-bottom:4px;">Agents — week of '+anchorWeek+'</div>';
+  if(agentPanelRows.length===0){
+    agentPanelHtml += '<div class="empty" style="padding:4px 0;">No agent activity this week.</div>';
+  } else {
+    agentPanelHtml += '<table style="font-size:12px;"><thead><tr><th>Agent</th><th>Answered</th><th>Outbound</th></tr></thead><tbody>';
+    agentPanelRows.forEach(function(r){
+      agentPanelHtml += '<tr><td>'+escapeHtml(r.label)+(r.covering?'<span class="buddyTag">covering</span>':'')+'</td>' +
+        '<td>'+r.answered+'</td><td>'+r.outboundMade+'</td></tr>';
+    });
+    agentPanelHtml += '</tbody></table>';
+  }
+  agentPanelHtml += '</div>';
+
   var html = '<div class="card"><h2>Queue performance over time</h2>' +
     '<div class="muted" style="margin-bottom:10px;">Showing the 12 '+(granularity==="month"?"months":"weeks")+' through '+
     (granularity==="month" ? monthLabel(anchorMonth) : ("week of "+anchorWeek)) +
@@ -734,6 +795,7 @@ function renderTrends(){
     '<option value="week"'+(granularity==="week"?' selected':'')+'>Week</option>' +
     '<option value="month"'+(granularity==="month"?' selected':'')+'>Month</option>' +
     '</select></div>';
+  html += agentPanelHtml;
   html += '</div>';
   if(!qClinic){
     html += '<div class="muted" style="margin-bottom:10px;">This queue isn\'t mapped to a clinic yet, so outbound calls made can\'t be matched to it — map it under Line Mapping to see that line.</div>';
@@ -931,13 +993,20 @@ function renderPccTable(){
   var root = document.getElementById("tab-table");
   var weeks = allWeeks();
   if(weeks.length===0){ root.innerHTML = '<div class="card"><div class="empty">No data yet.</div></div>'; return; }
-  var week = state.selectedWeek || weeks[weeks.length-1];
+
+  // state.tableWeeks lets this tab show call details summed across more than one week.
+  // Default / fall back to just the globally-selected week whenever it's empty or stale.
+  if(!state.tableWeeks || state.tableWeeks.length===0 ||
+     !state.tableWeeks.every(function(w){ return weeks.indexOf(w)!==-1; })){
+    state.tableWeeks = [state.selectedWeek && weeks.indexOf(state.selectedWeek)!==-1 ? state.selectedWeek : weeks[weeks.length-1]];
+  }
+  var selectedWeeks = state.tableWeeks.slice().sort();
 
   var rows = [];
   Object.keys(state.lines).forEach(function(ext){
     var line = state.lines[ext];
     if(line.category==="ignore") return;
-    var d = (state.weekly[ext]||{})[week];
+    var d = sumWeeklyForWeeks(ext, selectedWeeks);
     if(!d) return;
     rows.push({ext:ext, clinic:line.clinic||"(unmapped)", label:line.label, d:d});
   });
@@ -950,7 +1019,19 @@ function renderPccTable(){
     totals.talkTimeSec += r.d.talkTimeSec;
   });
 
-  var html = '<div class="card"><h2>PCC performance — week of ' + week + '</h2>';
+  var headerLabel = selectedWeeks.length===1 ? ("week of " + selectedWeeks[0]) :
+    (selectedWeeks.length + " weeks selected (" + selectedWeeks[0] + " – " + selectedWeeks[selectedWeeks.length-1] + ", combined)");
+
+  var html = '<div class="card"><h2>PCC performance — ' + headerLabel + '</h2>';
+  html += '<div class="row" style="margin-bottom:12px; align-items:flex-end;">' +
+    '<div class="field" style="margin-bottom:0;"><label>Weeks shown (ctrl/cmd-click or shift-click to select multiple)</label>' +
+    '<select id="tableWeeksSelect" multiple size="'+Math.min(8, Math.max(4, weeks.length))+'" style="min-width:170px;">' +
+    weeks.slice().reverse().map(function(w){
+      return '<option value="'+w+'"'+(selectedWeeks.indexOf(w)!==-1?' selected':'')+'>Week of '+w+'</option>';
+    }).join("") + '</select></div>' +
+    '<div class="field" style="margin-bottom:0;"><button class="btn secondary sm" id="tableWeeksAll" type="button">Select all weeks</button></div>' +
+    '<div class="field" style="margin-bottom:0;"><button class="btn secondary sm" id="tableWeeksReset" type="button">Reset to current week</button></div>' +
+    '</div>';
   html += '<div class="searchBox"><input type="text" id="pccFilter" placeholder="Filter by clinic or name…" /></div>';
   html += '<table id="pccTableEl"><thead><tr><th>Clinic</th><th>Agent</th><th>Ext</th>' +
     '<th>Inbound Ans.</th><th>Inbound Unans.</th><th>Outbounds Made</th><th>Talk Time</th></tr></thead><tbody>';
@@ -967,6 +1048,21 @@ function renderPccTable(){
     '<td>'+fmtHMS(totals.talkTimeSec)+'</td></tr>';
   html += '</tbody></table></div>';
   root.innerHTML = html;
+
+  document.getElementById("tableWeeksSelect").addEventListener("change", function(e){
+    var opts = Array.prototype.slice.call(e.target.selectedOptions);
+    var picked = opts.map(function(o){ return o.value; });
+    state.tableWeeks = picked.length ? picked : [weeks[weeks.length-1]];
+    renderPccTable();
+  });
+  document.getElementById("tableWeeksAll").addEventListener("click", function(){
+    state.tableWeeks = weeks.slice();
+    renderPccTable();
+  });
+  document.getElementById("tableWeeksReset").addEventListener("click", function(){
+    state.tableWeeks = [state.selectedWeek && weeks.indexOf(state.selectedWeek)!==-1 ? state.selectedWeek : weeks[weeks.length-1]];
+    renderPccTable();
+  });
 
   document.getElementById("pccFilter").addEventListener("input", function(e){
     var q = e.target.value.toLowerCase();
